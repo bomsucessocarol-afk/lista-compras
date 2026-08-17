@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>Lista de Compras - Carol</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --navy:#383772;
+    --yellow:#FBAD09;
+    --lightblue:#A6C0E4;
+    --gray:#7E7A68;
+    --bg:#F4F5F9;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--bg);font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:var(--navy);}
+  #app{max-width:420px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:90px;}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;}
+  input,select{font-family:inherit;}
+  .header{background:var(--navy);padding:32px 20px 24px;border-radius:0 0 24px 24px;color:#fff;position:relative;}
+  .eyebrow{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--lightblue);margin:0;}
+  .h1{font-size:24px;font-weight:700;margin:2px 0 0;}
+  .sub{font-size:12px;color:var(--lightblue);margin:4px 0 0;}
+  .header-row{display:flex;align-items:center;gap:10px;}
+  .back-btn{color:#fff;font-size:22px;padding:4px;margin-left:-4px;}
+  .sync-badge{position:absolute;top:14px;right:16px;font-size:10px;padding:4px 9px;border-radius:999px;font-weight:600;display:flex;align-items:center;gap:4px;}
+  .sync-badge.ok{background:rgba(255,255,255,.15);color:#B9F0C4;}
+  .sync-badge.syncing{background:rgba(255,255,255,.15);color:var(--yellow);}
+  .sync-badge.off{background:rgba(255,255,255,.15);color:#F0B9B9;}
+  .cta{width:100%;border-radius:16px;padding:16px;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:700;font-size:14px;background:var(--yellow);color:var(--navy);box-shadow:0 6px 16px rgba(251,173,9,.35);}
+  .cta:active{transform:scale(.98);}
+  .section{padding:0 20px;margin-top:20px;}
+  .section-title{font-size:14px;font-weight:700;margin:0 0 10px;}
+  .card{background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.05);}
+  .list-card{width:100%;text-align:left;margin-bottom:12px;position:relative;}
+  .list-card .top{display:flex;justify-content:space-between;align-items:flex-start;}
+  .list-date{font-size:11px;color:var(--gray);margin:0;}
+  .list-total{font-size:18px;font-weight:700;margin:2px 0 0;}
+  .badge{font-size:10px;font-weight:700;padding:4px 8px;border-radius:999px;}
+  .badge.ok{background:#E9F2E9;color:#2E7D32;}
+  .badge.over{background:#FDE8E8;color:#C0392B;}
+  .list-meta{font-size:11px;color:var(--gray);margin-top:8px;}
+  .del-btn{position:absolute;top:12px;right:12px;font-size:14px;color:var(--gray);padding:4px;}
+  .empty{text-align:center;padding:40px 16px;border-radius:16px;background:#fff;border:1.5px dashed var(--lightblue);color:var(--gray);font-size:13px;}
+  .bottomnav{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:center;z-index:10;}
+  .bottomnav-inner{max-width:420px;width:100%;background:#fff;box-shadow:0 -2px 10px rgba(0,0,0,.06);border-radius:20px 20px 0 0;display:flex;padding:10px 32px;}
+  .nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;font-weight:600;color:var(--gray);}
+  .nav-btn.active{color:var(--navy);}
+  .nav-icon{font-size:18px;}
+  .field-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+  .field-label{font-size:11px;font-weight:600;color:var(--gray);}
+  .field-input{border:none;background:transparent;text-align:right;font-weight:700;font-size:14px;color:var(--navy);width:100px;}
+  .bar-track{height:8px;border-radius:99px;background:#eee;overflow:hidden;}
+  .bar-fill{height:100%;border-radius:99px;transition:width .3s;}
+  .meta-info{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--gray);}
+  .form-label{font-size:11px;font-weight:600;color:var(--gray);margin-bottom:8px;display:block;}
+  .text-input{width:100%;font-size:14px;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--bg);border:none;color:var(--navy);}
+  .form-row{display:flex;gap:8px;margin-bottom:12px;}
+  .form-row .text-input{margin-bottom:0;}
+  .qty-input{width:33%;}
+  .add-btn{width:100%;border-radius:12px;padding:11px;background:var(--navy);color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;}
+  .receipt{border-top:3px dashed var(--lightblue);}
+  .cat-group{margin-bottom:12px;}
+  .cat-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--gray);margin:0 0 4px;}
+  .item-row{display:flex;align-items:center;gap:8px;padding:6px 0;font-family:'Courier New',monospace;font-size:12px;}
+  .item-row.bought{opacity:.45;}
+  .chk{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--lightblue);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:var(--navy);}
+  .chk.on{background:var(--yellow);border-color:var(--yellow);}
+  .item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .item-name.bought{text-decoration:line-through;}
+  .item-calc{color:var(--gray);font-size:11px;white-space:nowrap;}
+  .item-sub{font-weight:700;width:64px;text-align:right;}
+  .item-del{color:var(--gray);padding:4px;flex-shrink:0;}
+  .receipt-total{display:flex;justify-content:space-between;border-top:1px dashed var(--lightblue);padding-top:10px;margin-top:6px;font-family:'Courier New',monospace;}
+  .save-btn{width:100%;border-radius:16px;padding:16px;font-weight:700;font-size:14px;background:var(--yellow);color:var(--navy);box-shadow:0 6px 16px rgba(251,173,9,.35);margin-top:6px;}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .stat-card{background:#fff;border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.05);}
+  .stat-card.wide{grid-column:span 2;}
+  .stat-label{font-size:10px;color:var(--gray);margin:0;}
+  .stat-value{font-size:17px;font-weight:700;margin:2px 0 0;}
+  .chart-wrap{display:flex;align-items:flex-end;gap:8px;height:140px;padding-top:10px;}
+  .chart-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px;}
+  .chart-bar{width:100%;border-radius:6px 6px 0 0;background:var(--yellow);min-height:3px;}
+  .chart-lbl{font-size:9px;color:var(--gray);}
+  .rank-row{display:flex;align-items:center;gap:10px;padding:6px 0;}
+  .rank-num{width:22px;height:22px;border-radius:50%;background:var(--lightblue);color:var(--navy);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .rank-name{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rank-count{font-size:12px;font-weight:700;color:var(--gray);}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ---------- Supabase ---------- */
+const SUPABASE_URL = "https://okoxgwkevxzxegqcsgwc.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rb3hnd2tldnh6eGVncWNzZ3djIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjQwNjMsImV4cCI6MjEwMDE0MDA2M30.g50BQ4i1t61Q2uOWVMb-k5NNcwGGyZRvv0BO9EaPQI4";
+const STORAGE_KEY = "shopping_lists";
+let sb = null;
+try{ sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); }catch(e){ sb = null; }
+
+/* ---------- local cache ---------- */
+const CACHE_KEY = "carol_shopping_lists_v1";
+function loadLocal(){
+  try{ return JSON.parse(localStorage.getItem(CACHE_KEY) || "[]"); }
+  catch(e){ return []; }
+}
+function saveLocal(lists){
+  try{ localStorage.setItem(CACHE_KEY, JSON.stringify(lists)); }catch(e){}
+}
+
+let syncStatus = "syncing"; // syncing | ok | off
+
+async function pullFromCloud(){
+  if(!sb) { syncStatus = "off"; render(); return; }
+  try{
+    const { data, error } = await sb.from('lista_compras_storage').select('dados').eq('chave', STORAGE_KEY).maybeSingle();
+    if(error) throw error;
+    if(data && data.dados){
+      state.lists = data.dados;
+      saveLocal(state.lists);
+    }
+    syncStatus = "ok";
+  }catch(e){
+    syncStatus = "off";
+  }
+  render();
+}
+
+async function pushToCloud(lists){
+  if(!sb) { syncStatus = "off"; render(); return; }
+  syncStatus = "syncing";
+  render();
+  try{
+    const { error } = await sb.from('lista_compras_storage').upsert({ chave: STORAGE_KEY, dados: lists, updated_at: new Date().toISOString() });
+    if(error) throw error;
+    syncStatus = "ok";
+  }catch(e){
+    syncStatus = "off";
+  }
+  render();
+}
+
+function persist(){
+  saveLocal(state.lists);
+  pushToCloud(state.lists);
+}
+
+/* ---------- constants ---------- */
+const CATEGORIES = [
+  {id:"hortifruti", label:"Hortifruti", emoji:"🥬"},
+  {id:"acougue", label:"Açougue", emoji:"🥩"},
+  {id:"padaria", label:"Padaria", emoji:"🍞"},
+  {id:"laticinios", label:"Laticínios", emoji:"🧀"},
+  {id:"limpeza", label:"Limpeza", emoji:"🧽"},
+  {id:"higiene", label:"Higiene", emoji:"🧴"},
+  {id:"bebidas", label:"Bebidas", emoji:"🥤"},
+  {id:"mercearia", label:"Mercearia", emoji:"🛒"},
+  {id:"outros", label:"Outros", emoji:"📦"},
+];
+
+/* ---------- helpers ---------- */
+function brl(v){ return (Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function fmtDate(d){
+  const date = new Date(d+"T00:00:00");
+  return date.toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'});
+}
+function monthKey(d){ return d.slice(0,7); }
+function monthLabel(key){
+  const [y,m] = key.split("-");
+  const d = new Date(Number(y), Number(m)-1, 1);
+  return d.toLocaleDateString('pt-BR',{month:'short'}).replace('.','');
+}
+function listTotal(l){ return l.items.reduce((s,it)=> s + (Number(it.qty)||0)*(Number(it.unitPrice)||0), 0); }
+function uid(p){ return p+"_"+Date.now()+"_"+Math.floor(Math.random()*1000); }
+function esc(s){ const d=document.createElement('div'); d.innerText=s; return d.innerHTML; }
+
+/* ---------- state ---------- */
+let state = {
+  screen: "home", // home | list | summary
+  lists: loadLocal(),
+  activeList: null,
+  form: { name:"", category:"mercearia", qty:"1", unitPrice:"" },
+};
+
+/* ---------- render ---------- */
+function render(){
+  const app = document.getElementById('app');
+  if(state.screen === 'home') app.innerHTML = renderHome();
+  else if(state.screen === 'list') app.innerHTML = renderListEditor();
+  else app.innerHTML = renderSummary();
+  bindEvents();
+}
+
+function syncBadge(){
+  if(syncStatus === 'ok') return `<div class="sync-badge ok">☁️ Sincronizado</div>`;
+  if(syncStatus === 'syncing') return `<div class="sync-badge syncing">🔄 Sincronizando...</div>`;
+  return `<div class="sync-badge off">📴 Offline</div>`;
+}
+
+function renderHome(){
+  const sorted = [...state.lists].sort((a,b)=> a.date < b.date ? 1 : -1);
+  const cards = sorted.map(l=>{
+    const total = listTotal(l);
+    const meta = Number(l.meta)||0;
+    const over = meta>0 && total>meta;
+    const bought = l.items.filter(i=>i.bought).length;
+    return `
+      <button class="card list-card" data-open="${l.id}">
+        <div class="top">
+          <div>
+            <p class="list-date">${fmtDate(l.date)}</p>
+            <p class="list-total">${brl(total)}</p>
+          </div>
+          <div class="badge ${over?'over':'ok'}">${over?'Acima da meta':'Dentro da meta'}</div>
+        </div>
+        <p class="list-meta">${l.items.length} ${l.items.length===1?'item':'itens'} · ${bought} comprado${bought!==1?'s':''}</p>
+        <span class="del-btn" data-del="${l.id}">✕</span>
+      </button>`;
+  }).join('');
+
+  return `
+    <div class="header">
+      ${syncBadge()}
+      <p class="eyebrow">Olá,</p>
+      <h1 class="h1">Carol</h1>
+      <p class="sub">Suas compras, sempre no controle</p>
+    </div>
+    <div class="section" style="margin-top:-16px;">
+      <button class="cta" id="btn-new">+ Nova lista de compras</button>
+    </div>
+    <div class="section"><h2 class="section-title">Listas salvas</h2></div>
+    <div class="section" style="margin-top:-8px;">
+      ${sorted.length===0 ? `<div class="empty">🛍️<br/><br/>Nenhuma lista ainda.<br/>Toque em "Nova lista" para começar.</div>` : cards}
+    </div>
+    ${bottomNav('home')}
+  `;
+}
+
+function renderListEditor(){
+  const l = state.activeList;
+  const total = listTotal(l);
+  const meta = Number(l.meta)||0;
+  const pct = meta>0 ? Math.min(100, (total/meta)*100) : 0;
+  const over = meta>0 && total>meta;
+  const f = state.form;
+
+  const grouped = CATEGORIES.map(c=>({...c, items: l.items.filter(it=>it.category===c.id)})).filter(g=>g.items.length>0);
+  const groupsHtml = grouped.map(g=>`
+    <div class="cat-group">
+      <p class="cat-title">${g.emoji} ${g.label}</p>
+      ${g.items.map(it=>{
+        const sub = it.qty*it.unitPrice;
+        return `
+        <div class="item-row ${it.bought?'bought':''}">
+          <span class="chk ${it.bought?'on':''}" data-toggle="${it.id}">${it.bought?'✓':''}</span>
+          <span class="item-name ${it.bought?'bought':''}">${esc(it.name)}</span>
+          <span class="item-calc">${it.qty}×${brl(it.unitPrice)}</span>
+          <span class="item-sub">${brl(sub)}</span>
+          <span class="item-del" data-remove="${it.id}">✕</span>
+        </div>`;
+      }).join('')}
+    </div>
+  `).join('');
+
+  const catOptions = CATEGORIES.map(c=>`<option value="${c.id}" ${c.id===f.category?'selected':''}>${c.emoji} ${c.label}</option>`).join('');
+
+  return `
+    <div class="header header-row">
+      <button class="back-btn" id="btn-back">‹</button>
+      <input type="date" id="date-input" value="${l.date}" style="background:transparent;border:none;color:#fff;font-size:14px;font-weight:600;" />
+    </div>
+    <div class="section" style="margin-top:-12px;">
+      <div class="card">
+        <div class="field-row">
+          <label class="field-label">Meta de gasto</label>
+          <input class="field-input" type="number" inputmode="decimal" id="meta-input" placeholder="0,00" value="${l.meta}" />
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${over?'#E74C3C':'var(--yellow)'};"></div></div>
+        <div class="meta-info">
+          <span>Gasto: <b style="color:${over?'#E74C3C':'var(--navy)'}">${brl(total)}</b></span>
+          ${meta>0 ? `<span>${over ? 'Excedeu '+brl(total-meta) : 'Falta '+brl(meta-total)}</span>` : ''}
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="card">
+        <span class="form-label">Adicionar produto</span>
+        <input class="text-input" id="f-name" placeholder="Nome do produto" value="${esc(f.name)}" />
+        <select class="text-input" id="f-cat">${catOptions}</select>
+        <div class="form-row">
+          <input class="text-input qty-input" id="f-qty" type="number" inputmode="decimal" placeholder="Qtd" value="${f.qty}" />
+          <input class="text-input" id="f-price" type="number" inputmode="decimal" placeholder="Valor unit. (R$)" value="${f.unitPrice}" />
+        </div>
+        <button class="add-btn" id="btn-add">+ Adicionar</button>
+      </div>
+    </div>
+    <div class="section">
+      <div class="card receipt">
+        ${l.items.length===0 ? `<p style="text-align:center;font-size:12px;color:var(--gray);padding:20px 0;">Nenhum produto na lista ainda.</p>` : groupsHtml}
+        ${l.items.length>0 ? `<div class="receipt-total"><span style="font-weight:700;font-size:12px;">TOTAL</span><span style="font-weight:700;font-size:16px;">${brl(total)}</span></div>` : ''}
+      </div>
+    </div>
+    <div class="section">
+      <button class="save-btn" id="btn-save">Salvar lista</button>
+    </div>
+  `;
+}
+
+function renderSummary(){
+  const lists = state.lists;
+  const now = new Date();
+  const curKey = now.toISOString().slice(0,7);
+  const lastD = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const lastKey = lastD.toISOString().slice(0,7);
+  const curYear = String(now.getFullYear());
+
+  const curMonthTotal = lists.filter(l=>monthKey(l.date)===curKey).reduce((s,l)=>s+listTotal(l),0);
+  const lastMonthTotal = lists.filter(l=>monthKey(l.date)===lastKey).reduce((s,l)=>s+listTotal(l),0);
+  const yearTotal = lists.filter(l=>l.date.slice(0,4)===curYear).reduce((s,l)=>s+listTotal(l),0);
+
+  const months = [];
+  for(let i=5;i>=0;i--){
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    const key = d.toISOString().slice(0,7);
+    const total = lists.filter(l=>monthKey(l.date)===key).reduce((s,l)=>s+listTotal(l),0);
+    months.push({key, label:monthLabel(key), total});
+  }
+  const maxVal = Math.max(1, ...months.map(m=>m.total));
+  const chartHtml = months.map(m=>`
+    <div class="chart-col">
+      <div class="chart-bar" style="height:${Math.max(3,(m.total/maxVal)*110)}px;"></div>
+      <span class="chart-lbl">${m.label}</span>
+    </div>
+  `).join('');
+
+  const map = {};
+  lists.forEach(l=> l.items.forEach(it=>{
+    const key = it.name.trim().toLowerCase();
+    if(!map[key]) map[key] = {name:it.name, count:0};
+    map[key].count += Number(it.qty)||0;
+  }));
+  const topItems = Object.values(map).sort((a,b)=>b.count-a.count).slice(0,5);
+  const rankHtml = topItems.map((it,idx)=>`
+    <div class="rank-row">
+      <div class="rank-num">${idx+1}</div>
+      <span class="rank-name">${esc(it.name)}</span>
+      <span class="rank-count">${it.count}x</span>
+    </div>
+  `).join('');
+
+  return `
+    <div class="header header-row">
+      <button class="back-btn" id="btn-back">‹</button>
+      <h1 style="font-size:17px;font-weight:700;margin:0;">Resumo</h1>
+    </div>
+    <div class="section">
+      <div class="stat-grid">
+        <div class="stat-card"><p class="stat-label">Este mês</p><p class="stat-value">${brl(curMonthTotal)}</p></div>
+        <div class="stat-card"><p class="stat-label">Mês passado</p><p class="stat-value">${brl(lastMonthTotal)}</p></div>
+        <div class="stat-card wide"><p class="stat-label">Total em ${curYear}</p><p class="stat-value">${brl(yearTotal)}</p></div>
+      </div>
+    </div>
+    <div class="section">
+      <h2 class="section-title">Últimos 6 meses</h2>
+      <div class="card">
+        ${lists.length===0 ? `<p style="text-align:center;font-size:12px;color:var(--gray);">Sem dados suficientes ainda.</p>` : `<div class="chart-wrap">${chartHtml}</div>`}
+      </div>
+    </div>
+    <div class="section">
+      <h2 class="section-title">Itens mais comprados</h2>
+      <div class="card">
+        ${topItems.length===0 ? `<p style="text-align:center;font-size:12px;color:var(--gray);">Nenhum produto registrado ainda.</p>` : rankHtml}
+      </div>
+    </div>
+    ${bottomNav('summary')}
+  `;
+}
+
+function bottomNav(active){
+  return `
+    <div class="bottomnav">
+      <div class="bottomnav-inner">
+        <button class="nav-btn ${active==='home'?'active':''}" id="nav-home"><span class="nav-icon">🏠</span>Início</button>
+        <button class="nav-btn ${active==='summary'?'active':''}" id="nav-summary"><span class="nav-icon">📊</span>Resumo</button>
+      </div>
+    </div>
+  `;
+}
+
+/* ---------- events ---------- */
+function bindEvents(){
+  const $ = sel => document.querySelector(sel);
+  const $$ = sel => document.querySelectorAll(sel);
+
+  if(state.screen === 'home'){
+    $('#btn-new').onclick = () => {
+      state.activeList = { id:uid('l'), date:new Date().toISOString().slice(0,10), meta:'', items:[] };
+      state.form = { name:'', category:'mercearia', qty:'1', unitPrice:'' };
+      state.screen = 'list';
+      render();
+    };
+    $$('[data-open]').forEach(b=> b.onclick = () => {
+      const id = b.getAttribute('data-open');
+      state.activeList = JSON.parse(JSON.stringify(state.lists.find(l=>l.id===id)));
+      state.screen = 'list';
+      render();
+    });
+    $$('[data-del]').forEach(b=> b.onclick = (e) => {
+      e.stopPropagation();
+      const id = b.getAttribute('data-del');
+      state.lists = state.lists.filter(l=>l.id!==id);
+      persist();
+      render();
+    });
+    $('#nav-summary') && ($('#nav-summary').onclick = () => { state.screen='summary'; render(); });
+  }
+
+  if(state.screen === 'list'){
+    $('#btn-back').onclick = () => { state.screen='home'; state.activeList=null; render(); };
+    $('#date-input').onchange = (e) => { state.activeList.date = e.target.value; };
+    $('#meta-input').oninput = (e) => { state.activeList.meta = e.target.value; render(); };
+    $('#f-name').oninput = (e)=> state.form.name = e.target.value;
+    $('#f-cat').onchange = (e)=> state.form.category = e.target.value;
+    $('#f-qty').oninput = (e)=> state.form.qty = e.target.value;
+    $('#f-price').oninput = (e)=> state.form.unitPrice = e.target.value;
+    $('#btn-add').onclick = () => {
+      const f = state.form;
+      if(!f.name.trim() || !f.unitPrice) return;
+      state.activeList.items.push({
+        id: uid('i'), name: f.name.trim(), category: f.category,
+        qty: Number(f.qty)||1, unitPrice: Number(f.unitPrice)||0, bought:false
+      });
+      state.form = { name:'', category:f.category, qty:'1', unitPrice:'' };
+      render();
+    };
+    $$('[data-toggle]').forEach(b=> b.onclick = () => {
+      const id = b.getAttribute('data-toggle');
+      const it = state.activeList.items.find(i=>i.id===id);
+      it.bought = !it.bought;
+      render();
+    });
+    $$('[data-remove]').forEach(b=> b.onclick = () => {
+      const id = b.getAttribute('data-remove');
+      state.activeList.items = state.activeList.items.filter(i=>i.id!==id);
+      render();
+    });
+    $('#btn-save').onclick = () => {
+      const exists = state.lists.some(l=>l.id===state.activeList.id);
+      state.lists = exists ? state.lists.map(l=> l.id===state.activeList.id ? state.activeList : l) : [...state.lists, state.activeList];
+      persist();
+      state.screen='home';
+      state.activeList=null;
+      render();
+    };
+  }
+
+  if(state.screen === 'summary'){
+    $('#btn-back').onclick = () => { state.screen='home'; render(); };
+    $('#nav-home') && ($('#nav-home').onclick = () => { state.screen='home'; render(); });
+  }
+}
+
+render();
+pullFromCloud();
+</script>
+</body>
+</html>
