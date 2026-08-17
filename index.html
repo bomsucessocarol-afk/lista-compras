@@ -3,7 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-<title>Lista de Compras - Carol</title>
+<title>Lista de Compras</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon-192.png" type="image/png" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-title" content="Lista de Compras" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#383772" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{
@@ -14,83 +21,131 @@
     --bg:#F4F5F9;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  html,body{margin:0;padding:0;background:var(--bg);font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:var(--navy);}
+  html,body{margin:0;padding:0;background:var(--bg);font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:var(--navy);line-height:1.4;}
   #app{max-width:420px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:90px;}
   button{font-family:inherit;cursor:pointer;border:none;background:none;}
   input,select{font-family:inherit;}
   .header{background:var(--navy);padding:32px 20px 24px;border-radius:0 0 24px 24px;color:#fff;position:relative;}
-  .eyebrow{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--lightblue);margin:0;}
-  .h1{font-size:24px;font-weight:700;margin:2px 0 0;}
-  .sub{font-size:12px;color:var(--lightblue);margin:4px 0 0;}
+  .eyebrow{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--lightblue);margin:0;}
+  .h1{font-size:27px;font-weight:700;margin:2px 0 0;}
+  .sub{font-size:13px;color:var(--lightblue);margin:4px 0 0;}
   .header-row{display:flex;align-items:center;gap:10px;}
-  .back-btn{color:#fff;font-size:22px;padding:4px;margin-left:-4px;}
-  .sync-badge{position:absolute;top:14px;right:16px;font-size:10px;padding:4px 9px;border-radius:999px;font-weight:600;display:flex;align-items:center;gap:4px;}
+  .back-btn{color:#fff;font-size:24px;padding:4px;margin-left:-4px;}
+  .sync-badge{position:absolute;top:14px;right:16px;font-size:11px;padding:4px 9px;border-radius:999px;font-weight:600;display:flex;align-items:center;gap:4px;}
   .sync-badge.ok{background:rgba(255,255,255,.15);color:#B9F0C4;}
   .sync-badge.syncing{background:rgba(255,255,255,.15);color:var(--yellow);}
   .sync-badge.off{background:rgba(255,255,255,.15);color:#F0B9B9;}
-  .cta{width:100%;border-radius:16px;padding:16px;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:700;font-size:14px;background:var(--yellow);color:var(--navy);box-shadow:0 6px 16px rgba(251,173,9,.35);}
+  .cta{width:100%;border-radius:16px;padding:17px;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:700;font-size:16px;background:var(--yellow);color:var(--navy);box-shadow:0 6px 16px rgba(251,173,9,.35);}
   .cta:active{transform:scale(.98);}
   .section{padding:0 20px;margin-top:20px;}
-  .section-title{font-size:14px;font-weight:700;margin:0 0 10px;}
+  .section-title{font-size:16px;font-weight:700;margin:0 0 10px;}
   .card{background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.05);}
   .list-card{width:100%;text-align:left;margin-bottom:12px;position:relative;}
   .list-card .top{display:flex;justify-content:space-between;align-items:flex-start;}
-  .list-date{font-size:11px;color:var(--gray);margin:0;}
-  .list-total{font-size:18px;font-weight:700;margin:2px 0 0;}
-  .badge{font-size:10px;font-weight:700;padding:4px 8px;border-radius:999px;}
+  .list-date{font-size:12px;color:var(--gray);margin:0;}
+  .list-total{font-size:21px;font-weight:700;margin:2px 0 0;}
+  .badge{font-size:11px;font-weight:700;padding:4px 8px;border-radius:999px;}
   .badge.ok{background:#E9F2E9;color:#2E7D32;}
   .badge.over{background:#FDE8E8;color:#C0392B;}
-  .list-meta{font-size:11px;color:var(--gray);margin-top:8px;}
-  .del-btn{position:absolute;top:12px;right:12px;font-size:14px;color:var(--gray);padding:4px;}
-  .empty{text-align:center;padding:40px 16px;border-radius:16px;background:#fff;border:1.5px dashed var(--lightblue);color:var(--gray);font-size:13px;}
+  .list-meta{font-size:12px;color:var(--gray);margin-top:8px;}
+  .del-btn{position:absolute;top:12px;right:12px;font-size:16px;color:var(--gray);padding:6px;}
+  .empty{text-align:center;padding:40px 16px;border-radius:16px;background:#fff;border:1.5px dashed var(--lightblue);color:var(--gray);font-size:14px;}
   .bottomnav{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:center;z-index:10;}
   .bottomnav-inner{max-width:420px;width:100%;background:#fff;box-shadow:0 -2px 10px rgba(0,0,0,.06);border-radius:20px 20px 0 0;display:flex;padding:10px 32px;}
-  .nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;font-weight:600;color:var(--gray);}
+  .nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;font-weight:600;color:var(--gray);}
   .nav-btn.active{color:var(--navy);}
-  .nav-icon{font-size:18px;}
+  .nav-icon{font-size:19px;}
   .field-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
-  .field-label{font-size:11px;font-weight:600;color:var(--gray);}
-  .field-input{border:none;background:transparent;text-align:right;font-weight:700;font-size:14px;color:var(--navy);width:100px;}
-  .bar-track{height:8px;border-radius:99px;background:#eee;overflow:hidden;}
+  .field-label{font-size:12px;font-weight:600;color:var(--gray);}
+  .field-input{border:none;background:transparent;text-align:right;font-weight:700;font-size:17px;color:var(--navy);width:110px;}
+  .bar-track{height:9px;border-radius:99px;background:#eee;overflow:hidden;}
   .bar-fill{height:100%;border-radius:99px;transition:width .3s;}
-  .meta-info{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--gray);}
-  .form-label{font-size:11px;font-weight:600;color:var(--gray);margin-bottom:8px;display:block;}
-  .text-input{width:100%;font-size:14px;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--bg);border:none;color:var(--navy);}
+  .meta-info{display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:var(--gray);}
+  .form-label{font-size:12px;font-weight:600;color:var(--gray);margin-bottom:8px;display:block;}
+  .text-input{width:100%;font-size:16px;border-radius:10px;padding:11px 12px;margin-bottom:8px;background:var(--bg);border:none;color:var(--navy);}
   .form-row{display:flex;gap:8px;margin-bottom:12px;}
   .form-row .text-input{margin-bottom:0;}
   .qty-input{width:33%;}
-  .add-btn{width:100%;border-radius:12px;padding:11px;background:var(--navy);color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;}
+  .add-btn{width:100%;border-radius:12px;padding:13px;background:var(--navy);color:#fff;font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center;gap:6px;}
   .receipt{border-top:3px dashed var(--lightblue);}
-  .cat-group{margin-bottom:12px;}
-  .cat-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--gray);margin:0 0 4px;}
-  .item-row{display:flex;align-items:center;gap:8px;padding:6px 0;font-family:'Courier New',monospace;font-size:12px;}
+  .cat-group{margin-bottom:14px;}
+  .cat-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--gray);margin:0 0 6px;}
+  .item-row{display:flex;align-items:center;gap:8px;padding:8px 0;font-family:'Courier New',monospace;font-size:14px;}
   .item-row.bought{opacity:.45;}
-  .chk{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--lightblue);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:var(--navy);}
+  .chk{width:24px;height:24px;border-radius:7px;border:1.5px solid var(--lightblue);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;color:var(--navy);}
   .chk.on{background:var(--yellow);border-color:var(--yellow);}
   .item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .item-name.bought{text-decoration:line-through;}
-  .item-calc{color:var(--gray);font-size:11px;white-space:nowrap;}
-  .item-sub{font-weight:700;width:64px;text-align:right;}
-  .item-del{color:var(--gray);padding:4px;flex-shrink:0;}
+  .item-calc{color:var(--gray);font-size:12px;white-space:nowrap;}
+  .item-sub{font-weight:700;width:72px;text-align:right;}
+  .item-del{color:var(--gray);padding:6px;flex-shrink:0;font-size:14px;}
   .receipt-total{display:flex;justify-content:space-between;border-top:1px dashed var(--lightblue);padding-top:10px;margin-top:6px;font-family:'Courier New',monospace;}
-  .save-btn{width:100%;border-radius:16px;padding:16px;font-weight:700;font-size:14px;background:var(--yellow);color:var(--navy);box-shadow:0 6px 16px rgba(251,173,9,.35);margin-top:6px;}
+  .receipt-total span:first-child{font-weight:700;font-size:13px;}
+  .receipt-total span:last-child{font-weight:700;font-size:18px;}
+  .save-btn{width:100%;border-radius:16px;padding:17px;font-weight:700;font-size:16px;background:var(--yellow);color:var(--navy);box-shadow:0 6px 16px rgba(251,173,9,.35);margin-top:6px;}
   .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .stat-card{background:#fff;border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.05);}
   .stat-card.wide{grid-column:span 2;}
-  .stat-label{font-size:10px;color:var(--gray);margin:0;}
-  .stat-value{font-size:17px;font-weight:700;margin:2px 0 0;}
+  .stat-label{font-size:11px;color:var(--gray);margin:0;}
+  .stat-value{font-size:19px;font-weight:700;margin:2px 0 0;}
   .chart-wrap{display:flex;align-items:flex-end;gap:8px;height:140px;padding-top:10px;}
   .chart-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px;}
   .chart-bar{width:100%;border-radius:6px 6px 0 0;background:var(--yellow);min-height:3px;}
-  .chart-lbl{font-size:9px;color:var(--gray);}
-  .rank-row{display:flex;align-items:center;gap:10px;padding:6px 0;}
-  .rank-num{width:22px;height:22px;border-radius:50%;background:var(--lightblue);color:var(--navy);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-  .rank-name{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .rank-count{font-size:12px;font-weight:700;color:var(--gray);}
+  .chart-lbl{font-size:10px;color:var(--gray);}
+  .rank-row{display:flex;align-items:center;gap:10px;padding:7px 0;}
+  .rank-num{width:24px;height:24px;border-radius:50%;background:var(--lightblue);color:var(--navy);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .rank-name{flex:1;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rank-count{font-size:14px;font-weight:700;color:var(--gray);}
+
+  /* Floating calculator button */
+  .calc-fab{position:fixed;bottom:96px;right:20px;width:52px;height:52px;border-radius:50%;background:var(--navy);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(56,55,114,.4);z-index:20;}
+  .calc-fab:active{transform:scale(.94);}
+
+  /* Overlays (calculator + new-list modal) */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center;z-index:50;}
+  .overlay.show{display:flex;}
+  .overlay-box{background:#fff;width:100%;max-width:420px;border-radius:24px 24px 0 0;padding:20px;padding-bottom:34px;}
+  .overlay-title{font-size:16px;font-weight:700;margin:0 0 4px;}
+  .overlay-sub{font-size:13px;color:var(--gray);margin:0 0 16px;}
+
+  .calc-display{background:var(--bg);border-radius:14px;padding:18px 16px;text-align:right;font-family:'Courier New',monospace;font-size:32px;font-weight:700;color:var(--navy);margin-bottom:14px;overflow-x:auto;white-space:nowrap;}
+  .calc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  .calc-btn{background:var(--bg);border-radius:14px;padding:18px 0;font-size:19px;font-weight:700;color:var(--navy);text-align:center;}
+  .calc-btn.op{background:var(--lightblue);color:var(--navy);}
+  .calc-btn.eq{background:var(--yellow);color:var(--navy);}
+  .calc-btn.clear{background:#FDE8E8;color:#C0392B;}
+  .calc-close{width:100%;margin-top:14px;padding:14px;border-radius:14px;background:var(--bg);color:var(--gray);font-weight:700;font-size:15px;text-align:center;}
+
+  .modal-btn{width:100%;border-radius:14px;padding:15px;font-weight:700;font-size:14px;margin-bottom:10px;background:var(--bg);color:var(--navy);text-align:left;}
+  .modal-btn:last-child{margin-bottom:0;}
+  .modal-btn b{display:block;font-size:14px;}
+  .modal-btn span{display:block;font-size:12px;font-weight:500;color:var(--gray);margin-top:2px;}
 </style>
 </head>
 <body>
 <div id="app"></div>
+
+<button id="calc-fab" class="calc-fab" title="Calculadora">🧮</button>
+
+<div id="calc-overlay" class="overlay">
+  <div class="overlay-box">
+    <p class="overlay-title">Calculadora</p>
+    <p class="overlay-sub">Só pra conferir contas — não mexe na sua lista.</p>
+    <div class="calc-display" id="calc-display">0</div>
+    <div class="calc-grid" id="calc-grid"></div>
+    <button class="calc-close" id="calc-close">Fechar</button>
+  </div>
+</div>
+
+<div id="newlist-overlay" class="overlay">
+  <div class="overlay-box">
+    <p class="overlay-title">Nova lista</p>
+    <p class="overlay-sub">Quer repetir os itens da última lista?</p>
+    <button class="modal-btn" data-newlist="all"><b>Repetir todos os itens</b><span>Copia tudo, desmarcado, pra você comprar de novo</span></button>
+    <button class="modal-btn" data-newlist="pending"><b>Repetir só o que faltou</b><span>Copia apenas os itens que não foram comprados</span></button>
+    <button class="modal-btn" data-newlist="empty"><b>Começar do zero</b><span>Lista em branco</span></button>
+  </div>
+</div>
 
 <script>
 /* ---------- Supabase ---------- */
@@ -110,7 +165,7 @@ function saveLocal(lists){
   try{ localStorage.setItem(CACHE_KEY, JSON.stringify(lists)); }catch(e){}
 }
 
-let syncStatus = "syncing"; // syncing | ok | off
+let syncStatus = "syncing";
 
 async function pullFromCloud(){
   if(!sb) { syncStatus = "off"; render(); return; }
@@ -178,7 +233,7 @@ function esc(s){ const d=document.createElement('div'); d.innerText=s; return d.
 
 /* ---------- state ---------- */
 let state = {
-  screen: "home", // home | list | summary
+  screen: "home",
   lists: loadLocal(),
   activeList: null,
   form: { name:"", category:"mercearia", qty:"1", unitPrice:"" },
@@ -269,7 +324,7 @@ function renderListEditor(){
   return `
     <div class="header header-row">
       <button class="back-btn" id="btn-back">‹</button>
-      <input type="date" id="date-input" value="${l.date}" style="background:transparent;border:none;color:#fff;font-size:14px;font-weight:600;" />
+      <input type="date" id="date-input" value="${l.date}" style="background:transparent;border:none;color:#fff;font-size:15px;font-weight:600;" />
     </div>
     <div class="section" style="margin-top:-12px;">
       <div class="card">
@@ -277,10 +332,10 @@ function renderListEditor(){
           <label class="field-label">Meta de gasto</label>
           <input class="field-input" type="number" inputmode="decimal" id="meta-input" placeholder="0,00" value="${l.meta}" />
         </div>
-        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${over?'#E74C3C':'var(--yellow)'};"></div></div>
+        <div class="bar-track"><div class="bar-fill" id="bar-fill" style="width:${pct}%;background:${over?'#E74C3C':'var(--yellow)'};"></div></div>
         <div class="meta-info">
-          <span>Gasto: <b style="color:${over?'#E74C3C':'var(--navy)'}">${brl(total)}</b></span>
-          ${meta>0 ? `<span>${over ? 'Excedeu '+brl(total-meta) : 'Falta '+brl(meta-total)}</span>` : ''}
+          <span>Gasto: <b id="gasto-val" style="color:${over?'#E74C3C':'var(--navy)'}">${brl(total)}</b></span>
+          <span id="meta-extra">${meta>0 ? (over ? `Excedeu ${brl(total-meta)}` : `Falta ${brl(meta-total)}`) : ''}</span>
         </div>
       </div>
     </div>
@@ -298,8 +353,8 @@ function renderListEditor(){
     </div>
     <div class="section">
       <div class="card receipt">
-        ${l.items.length===0 ? `<p style="text-align:center;font-size:12px;color:var(--gray);padding:20px 0;">Nenhum produto na lista ainda.</p>` : groupsHtml}
-        ${l.items.length>0 ? `<div class="receipt-total"><span style="font-weight:700;font-size:12px;">TOTAL</span><span style="font-weight:700;font-size:16px;">${brl(total)}</span></div>` : ''}
+        ${l.items.length===0 ? `<p style="text-align:center;font-size:13px;color:var(--gray);padding:20px 0;">Nenhum produto na lista ainda.</p>` : groupsHtml}
+        ${l.items.length>0 ? `<div class="receipt-total"><span>TOTAL</span><span>${brl(total)}</span></div>` : ''}
       </div>
     </div>
     <div class="section">
@@ -353,7 +408,7 @@ function renderSummary(){
   return `
     <div class="header header-row">
       <button class="back-btn" id="btn-back">‹</button>
-      <h1 style="font-size:17px;font-weight:700;margin:0;">Resumo</h1>
+      <h1 style="font-size:18px;font-weight:700;margin:0;">Resumo</h1>
     </div>
     <div class="section">
       <div class="stat-grid">
@@ -365,13 +420,13 @@ function renderSummary(){
     <div class="section">
       <h2 class="section-title">Últimos 6 meses</h2>
       <div class="card">
-        ${lists.length===0 ? `<p style="text-align:center;font-size:12px;color:var(--gray);">Sem dados suficientes ainda.</p>` : `<div class="chart-wrap">${chartHtml}</div>`}
+        ${lists.length===0 ? `<p style="text-align:center;font-size:13px;color:var(--gray);">Sem dados suficientes ainda.</p>` : `<div class="chart-wrap">${chartHtml}</div>`}
       </div>
     </div>
     <div class="section">
       <h2 class="section-title">Itens mais comprados</h2>
       <div class="card">
-        ${topItems.length===0 ? `<p style="text-align:center;font-size:12px;color:var(--gray);">Nenhum produto registrado ainda.</p>` : rankHtml}
+        ${topItems.length===0 ? `<p style="text-align:center;font-size:13px;color:var(--gray);">Nenhum produto registrado ainda.</p>` : rankHtml}
       </div>
     </div>
     ${bottomNav('summary')}
@@ -389,6 +444,21 @@ function bottomNav(active){
   `;
 }
 
+/* ---------- meta bar: targeted update (no full re-render, avoids losing focus) ---------- */
+function updateMetaBarUI(){
+  const l = state.activeList;
+  const total = listTotal(l);
+  const meta = Number(l.meta)||0;
+  const pct = meta>0 ? Math.min(100,(total/meta)*100) : 0;
+  const over = meta>0 && total>meta;
+  const bar = document.getElementById('bar-fill');
+  if(bar){ bar.style.width = pct+'%'; bar.style.background = over ? '#E74C3C' : 'var(--yellow)'; }
+  const gastoEl = document.getElementById('gasto-val');
+  if(gastoEl){ gastoEl.textContent = brl(total); gastoEl.style.color = over ? '#E74C3C' : 'var(--navy)'; }
+  const extraEl = document.getElementById('meta-extra');
+  if(extraEl){ extraEl.textContent = meta>0 ? (over ? `Excedeu ${brl(total-meta)}` : `Falta ${brl(meta-total)}`) : ''; }
+}
+
 /* ---------- events ---------- */
 function bindEvents(){
   const $ = sel => document.querySelector(sel);
@@ -396,10 +466,11 @@ function bindEvents(){
 
   if(state.screen === 'home'){
     $('#btn-new').onclick = () => {
-      state.activeList = { id:uid('l'), date:new Date().toISOString().slice(0,10), meta:'', items:[] };
-      state.form = { name:'', category:'mercearia', qty:'1', unitPrice:'' };
-      state.screen = 'list';
-      render();
+      if(state.lists.length > 0){
+        document.getElementById('newlist-overlay').classList.add('show');
+      } else {
+        createNewList([]);
+      }
     };
     $$('[data-open]').forEach(b=> b.onclick = () => {
       const id = b.getAttribute('data-open');
@@ -420,7 +491,7 @@ function bindEvents(){
   if(state.screen === 'list'){
     $('#btn-back').onclick = () => { state.screen='home'; state.activeList=null; render(); };
     $('#date-input').onchange = (e) => { state.activeList.date = e.target.value; };
-    $('#meta-input').oninput = (e) => { state.activeList.meta = e.target.value; render(); };
+    $('#meta-input').oninput = (e) => { state.activeList.meta = e.target.value; updateMetaBarUI(); };
     $('#f-name').oninput = (e)=> state.form.name = e.target.value;
     $('#f-cat').onchange = (e)=> state.form.category = e.target.value;
     $('#f-qty').oninput = (e)=> state.form.qty = e.target.value;
@@ -461,6 +532,80 @@ function bindEvents(){
     $('#nav-home') && ($('#nav-home').onclick = () => { state.screen='home'; render(); });
   }
 }
+
+function createNewList(items){
+  state.activeList = {
+    id: uid('l'),
+    date: new Date().toISOString().slice(0,10),
+    meta: '',
+    items: items,
+  };
+  state.form = { name:'', category:'mercearia', qty:'1', unitPrice:'' };
+  state.screen = 'list';
+  render();
+}
+
+/* ---------- new-list modal ---------- */
+document.getElementById('newlist-overlay').addEventListener('click', (e)=>{
+  const mode = e.target.closest('[data-newlist]');
+  if(!mode) return;
+  const value = mode.getAttribute('data-newlist');
+  document.getElementById('newlist-overlay').classList.remove('show');
+  const sorted = [...state.lists].sort((a,b)=> a.date < b.date ? 1 : -1);
+  const last = sorted[0];
+  if(value === 'empty' || !last){
+    createNewList([]);
+  } else if(value === 'all'){
+    const copied = last.items.map(it => ({...it, id: uid('i'), bought:false}));
+    createNewList(copied);
+  } else if(value === 'pending'){
+    const copied = last.items.filter(it=>!it.bought).map(it => ({...it, id: uid('i'), bought:false}));
+    createNewList(copied);
+  }
+});
+
+/* ---------- calculator (independent of list state) ---------- */
+const calcKeys = ['C','⌫','%','÷','7','8','9','×','4','5','6','-','1','2','3','+','0','.','='];
+const calcGrid = document.getElementById('calc-grid');
+calcGrid.innerHTML = calcKeys.map(k=>{
+  let cls = 'calc-btn';
+  if(['÷','×','-','+'].includes(k)) cls += ' op';
+  if(k==='=') cls += ' eq';
+  if(k==='C') cls += ' clear';
+  const style = k==='0' ? 'grid-column: span 2;' : '';
+  return `<button class="${cls}" style="${style}" data-key="${k}">${k}</button>`;
+}).join('');
+
+let calcExpr = '';
+const calcDisplay = document.getElementById('calc-display');
+function calcRefresh(){ calcDisplay.textContent = calcExpr === '' ? '0' : calcExpr; }
+function calcPress(k){
+  if(k === 'C'){ calcExpr = ''; calcRefresh(); return; }
+  if(k === '⌫'){ calcExpr = calcExpr.slice(0,-1); calcRefresh(); return; }
+  if(k === '='){
+    try{
+      const safe = calcExpr.replace(/×/g,'*').replace(/÷/g,'/').replace(/%/g,'/100');
+      if(!/^[0-9+\-*/.() ]+$/.test(safe)) return;
+      const result = Function('"use strict"; return (' + safe + ')')();
+      calcExpr = String(Math.round((result + Number.EPSILON) * 100) / 100);
+    }catch(e){ calcExpr = 'Erro'; }
+    calcRefresh();
+    return;
+  }
+  calcExpr += k;
+  calcRefresh();
+}
+calcGrid.addEventListener('click', (e)=>{
+  const btn = e.target.closest('[data-key]');
+  if(!btn) return;
+  calcPress(btn.getAttribute('data-key'));
+});
+document.getElementById('calc-fab').onclick = () => {
+  document.getElementById('calc-overlay').classList.add('show');
+};
+document.getElementById('calc-close').onclick = () => {
+  document.getElementById('calc-overlay').classList.remove('show');
+};
 
 render();
 pullFromCloud();
