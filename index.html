@@ -21,7 +21,7 @@
     --bg:#F4F5F9;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  html,body{margin:0;padding:0;background:var(--bg);font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:var(--navy);line-height:1.4;}
+  html,body{margin:0;padding:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",'Segoe UI',Roboto,Arial,sans-serif;color:var(--navy);line-height:1.4;}
   #app{max-width:420px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:90px;}
   button{font-family:inherit;cursor:pointer;border:none;background:none;}
   input,select{font-family:inherit;}
@@ -97,6 +97,14 @@
   .rank-name{flex:1;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .rank-count{font-size:14px;font-weight:700;color:var(--gray);}
 
+  .yoy-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .yoy-col{flex:1;text-align:center;}
+  .yoy-arrow{font-size:18px;color:var(--lightblue);font-weight:700;}
+  .yoy-badge{margin-top:14px;text-align:center;font-size:13px;font-weight:700;padding:9px;border-radius:12px;}
+  .yoy-badge.up{background:#FDE8E8;color:#C0392B;}
+  .yoy-badge.down{background:#E9F2E9;color:#2E7D32;}
+  .yoy-badge.flat{background:var(--bg);color:var(--gray);}
+
   /* Floating calculator button */
   .calc-fab{position:fixed;bottom:96px;right:20px;width:52px;height:52px;border-radius:50%;background:var(--navy);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(56,55,114,.4);z-index:20;}
   .calc-fab:active{transform:scale(.94);}
@@ -120,6 +128,24 @@
   .modal-btn:last-child{margin-bottom:0;}
   .modal-btn b{display:block;font-size:14px;}
   .modal-btn span{display:block;font-size:12px;font-weight:500;color:var(--gray);margin-top:2px;}
+
+  .market-tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:var(--navy);background:var(--lightblue);padding:3px 9px;border-radius:999px;margin-top:6px;}
+  .list-name{font-size:15px;font-weight:700;margin:0 0 2px;color:var(--navy);}
+  .photo-btn{width:100%;border-radius:12px;padding:13px;background:var(--lightblue);color:var(--navy);font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:8px;}
+  .photo-status{text-align:center;font-size:12px;color:var(--gray);margin:-2px 0 8px;}
+  .prio-row{display:flex;gap:6px;margin-bottom:12px;}
+  .prio-btn{flex:1;border-radius:10px;padding:9px 0;font-size:12px;font-weight:700;text-align:center;background:var(--bg);color:var(--gray);border:1.5px solid transparent;}
+  .prio-btn.selected{border-color:currentColor;}
+  .prio-btn.p-alta{color:#C0392B;}
+  .prio-btn.p-alta.selected{background:#FDE8E8;}
+  .prio-btn.p-normal{color:#B8860B;}
+  .prio-btn.p-normal.selected{background:#FDF3D9;}
+  .prio-btn.p-baixa{color:#2E7D32;}
+  .prio-btn.p-baixa.selected{background:#E9F2E9;}
+  .prio-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .prio-dot.alta{background:#E74C3C;}
+  .prio-dot.normal{background:#FBAD09;}
+  .prio-dot.baixa{background:#2E7D32;}
 </style>
 </head>
 <body>
@@ -230,13 +256,15 @@ function monthLabel(key){
 function listTotal(l){ return l.items.reduce((s,it)=> s + (Number(it.qty)||0)*(Number(it.unitPrice)||0), 0); }
 function uid(p){ return p+"_"+Date.now()+"_"+Math.floor(Math.random()*1000); }
 function esc(s){ const d=document.createElement('div'); d.innerText=s; return d.innerHTML; }
+function prioLabel(p){ return p==='alta' ? 'Essencial' : (p==='baixa' ? 'Se sobrar' : 'Normal'); }
 
 /* ---------- state ---------- */
 let state = {
   screen: "home",
   lists: loadLocal(),
   activeList: null,
-  form: { name:"", category:"mercearia", qty:"1", unitPrice:"" },
+  form: { name:"", category:"mercearia", qty:"1", unitPrice:"", priority:"normal" },
+  ocrStatus: null,
 };
 
 /* ---------- render ---------- */
@@ -265,12 +293,14 @@ function renderHome(){
       <button class="card list-card" data-open="${l.id}">
         <div class="top">
           <div>
+            ${l.name ? `<p class="list-name">${esc(l.name)}</p>` : ''}
             <p class="list-date">${fmtDate(l.date)}</p>
             <p class="list-total">${brl(total)}</p>
           </div>
           <div class="badge ${over?'over':'ok'}">${over?'Acima da meta':'Dentro da meta'}</div>
         </div>
         <p class="list-meta">${l.items.length} ${l.items.length===1?'item':'itens'} · ${bought} comprado${bought!==1?'s':''}</p>
+        ${l.market ? `<span class="market-tag">🏪 ${esc(l.market)}</span>` : ''}
         <span class="del-btn" data-del="${l.id}">✕</span>
       </button>`;
   }).join('');
@@ -307,8 +337,10 @@ function renderListEditor(){
       <p class="cat-title">${g.emoji} ${g.label}</p>
       ${g.items.map(it=>{
         const sub = it.qty*it.unitPrice;
+        const prio = it.priority || 'normal';
         return `
         <div class="item-row ${it.bought?'bought':''}">
+          <span class="prio-dot ${prio}" title="${prioLabel(prio)}"></span>
           <span class="chk ${it.bought?'on':''}" data-toggle="${it.id}">${it.bought?'✓':''}</span>
           <span class="item-name ${it.bought?'bought':''}">${esc(it.name)}</span>
           <span class="item-calc">${it.qty}×${brl(it.unitPrice)}</span>
@@ -320,6 +352,7 @@ function renderListEditor(){
   `).join('');
 
   const catOptions = CATEGORIES.map(c=>`<option value="${c.id}" ${c.id===f.category?'selected':''}>${c.emoji} ${c.label}</option>`).join('');
+  const prio = f.priority || 'normal';
 
   return `
     <div class="header header-row">
@@ -327,6 +360,12 @@ function renderListEditor(){
       <input type="date" id="date-input" value="${l.date}" style="background:transparent;border:none;color:#fff;font-size:15px;font-weight:600;" />
     </div>
     <div class="section" style="margin-top:-12px;">
+      <div class="card">
+        <input class="text-input" id="list-name-input" placeholder="Nome da lista (opcional, ex: Compra do mês)" value="${esc(l.name||'')}" />
+        <input class="text-input" id="list-market-input" style="margin-bottom:0;" placeholder="🏪 Mercado (opcional, ex: Atacadão)" value="${esc(l.market||'')}" />
+      </div>
+    </div>
+    <div class="section">
       <div class="card">
         <div class="field-row">
           <label class="field-label">Meta de gasto</label>
@@ -342,11 +381,20 @@ function renderListEditor(){
     <div class="section">
       <div class="card">
         <span class="form-label">Adicionar produto</span>
+        <input type="file" id="label-photo-input" accept="image/*" capture="environment" style="display:none" />
+        <button class="photo-btn" id="btn-photo">📷 Ler etiqueta (beta)</button>
+        ${state.ocrStatus ? `<p class="photo-status">${state.ocrStatus}</p>` : ''}
         <input class="text-input" id="f-name" placeholder="Nome do produto" value="${esc(f.name)}" />
         <select class="text-input" id="f-cat">${catOptions}</select>
-        <div class="form-row">
+        <div class="form-row" style="margin-bottom:10px;">
           <input class="text-input qty-input" id="f-qty" type="number" inputmode="decimal" placeholder="Qtd" value="${f.qty}" />
           <input class="text-input" id="f-price" type="number" inputmode="decimal" placeholder="Valor unit. (R$)" value="${f.unitPrice}" />
+        </div>
+        <span class="form-label">Prioridade</span>
+        <div class="prio-row">
+          <button class="prio-btn p-alta ${prio==='alta'?'selected':''}" data-prio="alta">🔴 Essencial</button>
+          <button class="prio-btn p-normal ${prio==='normal'?'selected':''}" data-prio="normal">🟡 Normal</button>
+          <button class="prio-btn p-baixa ${prio==='baixa'?'selected':''}" data-prio="baixa">🟢 Se sobrar</button>
         </div>
         <button class="add-btn" id="btn-add">+ Adicionar</button>
       </div>
@@ -374,6 +422,15 @@ function renderSummary(){
   const curMonthTotal = lists.filter(l=>monthKey(l.date)===curKey).reduce((s,l)=>s+listTotal(l),0);
   const lastMonthTotal = lists.filter(l=>monthKey(l.date)===lastKey).reduce((s,l)=>s+listTotal(l),0);
   const yearTotal = lists.filter(l=>l.date.slice(0,4)===curYear).reduce((s,l)=>s+listTotal(l),0);
+
+  const sameMonthLastYearKey = `${now.getFullYear()-1}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const sameMonthLastYearTotal = lists.filter(l=>monthKey(l.date)===sameMonthLastYearKey).reduce((s,l)=>s+listTotal(l),0);
+  const monthNamePt = now.toLocaleDateString('pt-BR', {month:'long'});
+  const hasLastYearData = lists.some(l=>monthKey(l.date)===sameMonthLastYearKey);
+  let yoyPct = null;
+  if(hasLastYearData && sameMonthLastYearTotal > 0){
+    yoyPct = ((curMonthTotal - sameMonthLastYearTotal) / sameMonthLastYearTotal) * 100;
+  }
 
   const months = [];
   for(let i=5;i>=0;i--){
@@ -417,6 +474,32 @@ function renderSummary(){
         <div class="stat-card wide"><p class="stat-label">Total em ${curYear}</p><p class="stat-value">${brl(yearTotal)}</p></div>
       </div>
     </div>
+    <div class="section">
+      <h2 class="section-title">Comparado ao ano passado</h2>
+      <div class="card">
+        ${!hasLastYearData ? `
+          <p style="text-align:center;font-size:13px;color:var(--gray);">Ainda não tenho compras registradas em ${monthNamePt} do ano passado pra comparar.</p>
+        ` : `
+          <div class="yoy-row">
+            <div class="yoy-col">
+              <p class="stat-label">${monthNamePt}/${curYear}</p>
+              <p class="stat-value">${brl(curMonthTotal)}</p>
+            </div>
+            <div class="yoy-arrow">→</div>
+            <div class="yoy-col">
+              <p class="stat-label">${monthNamePt}/${curYear-1}</p>
+              <p class="stat-value">${brl(sameMonthLastYearTotal)}</p>
+            </div>
+          </div>
+          ${yoyPct !== null ? `
+            <div class="yoy-badge ${yoyPct > 0 ? 'up' : (yoyPct < 0 ? 'down' : 'flat')}">
+              ${yoyPct > 0 ? '▲' : (yoyPct < 0 ? '▼' : '—')} ${Math.abs(yoyPct).toFixed(0)}% ${yoyPct > 0 ? 'a mais' : (yoyPct < 0 ? 'a menos' : 'igual')} que ano passado
+            </div>
+          ` : ''}
+        `}
+      </div>
+    </div>
+
     <div class="section">
       <h2 class="section-title">Últimos 6 meses</h2>
       <div class="card">
@@ -491,19 +574,32 @@ function bindEvents(){
   if(state.screen === 'list'){
     $('#btn-back').onclick = () => { state.screen='home'; state.activeList=null; render(); };
     $('#date-input').onchange = (e) => { state.activeList.date = e.target.value; };
+    $('#list-name-input').oninput = (e) => { state.activeList.name = e.target.value; };
+    $('#list-market-input').oninput = (e) => { state.activeList.market = e.target.value; };
     $('#meta-input').oninput = (e) => { state.activeList.meta = e.target.value; updateMetaBarUI(); };
     $('#f-name').oninput = (e)=> state.form.name = e.target.value;
     $('#f-cat').onchange = (e)=> state.form.category = e.target.value;
     $('#f-qty').oninput = (e)=> state.form.qty = e.target.value;
     $('#f-price').oninput = (e)=> state.form.unitPrice = e.target.value;
+    $$('[data-prio]').forEach(b=> b.onclick = () => {
+      state.form.priority = b.getAttribute('data-prio');
+      render();
+    });
+    $('#btn-photo').onclick = () => $('#label-photo-input').click();
+    $('#label-photo-input').onchange = (e) => {
+      const file = e.target.files[0];
+      if(file) handleLabelPhoto(file);
+      e.target.value = '';
+    };
     $('#btn-add').onclick = () => {
       const f = state.form;
       if(!f.name.trim() || !f.unitPrice) return;
       state.activeList.items.push({
         id: uid('i'), name: f.name.trim(), category: f.category,
-        qty: Number(f.qty)||1, unitPrice: Number(f.unitPrice)||0, bought:false
+        qty: Number(f.qty)||1, unitPrice: Number(f.unitPrice)||0, bought:false,
+        priority: f.priority || 'normal'
       });
-      state.form = { name:'', category:f.category, qty:'1', unitPrice:'' };
+      state.form = { name:'', category:f.category, qty:'1', unitPrice:'', priority:f.priority||'normal' };
       render();
     };
     $$('[data-toggle]').forEach(b=> b.onclick = () => {
@@ -537,12 +633,57 @@ function createNewList(items){
   state.activeList = {
     id: uid('l'),
     date: new Date().toISOString().slice(0,10),
+    name: '',
+    market: '',
     meta: '',
     items: items,
   };
-  state.form = { name:'', category:'mercearia', qty:'1', unitPrice:'' };
+  state.form = { name:'', category:'mercearia', qty:'1', unitPrice:'', priority:'normal' };
   state.screen = 'list';
   render();
+}
+
+/* ---------- leitura de etiqueta (OCR no navegador, via Tesseract.js) ---------- */
+function ensureTesseract(cb){
+  if(window.Tesseract){ cb(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+  s.onload = cb;
+  s.onerror = () => {
+    state.ocrStatus = null;
+    render();
+    alert('Não consegui carregar o leitor de etiqueta agora. Ele precisa de internet na primeira vez que é usado. Tente digitar manualmente.');
+  };
+  document.head.appendChild(s);
+}
+
+function parseLabelText(text){
+  const priceMatches = text.match(/\d{1,4}[.,]\d{2}/g) || [];
+  let priceValue = '';
+  if(priceMatches.length){
+    const nums = priceMatches.map(p => parseFloat(p.replace(',', '.')));
+    priceValue = String(Math.max(...nums));
+  }
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  let nameLine = lines.find(l => /[a-zA-ZÀ-ÿ]{3,}/.test(l)) || '';
+  nameLine = nameLine.replace(/R\$\s*[\d.,]+/g, '').replace(/[\d.,]{4,}/g,'').trim();
+  state.form.name = nameLine.slice(0, 40);
+  if(priceValue) state.form.unitPrice = priceValue;
+}
+
+function handleLabelPhoto(file){
+  state.ocrStatus = 'Lendo etiqueta... (precisa de internet)';
+  render();
+  ensureTesseract(async () => {
+    try{
+      const result = await Tesseract.recognize(file, 'por');
+      parseLabelText(result.data.text || '');
+    }catch(e){
+      alert('Não consegui ler essa etiqueta. Tenta digitar manualmente.');
+    }
+    state.ocrStatus = null;
+    render();
+  });
 }
 
 /* ---------- new-list modal ---------- */
