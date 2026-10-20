@@ -1109,24 +1109,37 @@ function loadTesseract(){
     document.head.appendChild(s);
   });
 }
-async function prepImage(file){
-  let src;
-  try{ src = await createImageBitmap(file); }
-  catch(e){
-    src = await new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = rej; img.src = URL.createObjectURL(file); });
-  }
+async function loadBitmap(file){
+  try{ return await createImageBitmap(file); }
+  catch(e){ return await new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = rej; img.src = URL.createObjectURL(file); }); }
+}
+function boxBlurGray(g, w, h, r){
+  if(r < 1) return g;
+  const tmp = new Float32Array(w*h), out = new Float32Array(w*h), k = 2*r+1;
+  for(let y=0; y<h; y++){ let acc = 0; const row = y*w;
+    for(let x=-r; x<=r; x++) acc += g[row + Math.min(w-1, Math.max(0, x))];
+    for(let x=0; x<w; x++){ tmp[row+x] = acc/k; acc += g[row + Math.min(w-1, x+r+1)] - g[row + Math.max(0, x-r)]; } }
+  for(let x=0; x<w; x++){ let acc = 0;
+    for(let y=-r; y<=r; y++) acc += tmp[Math.min(h-1, Math.max(0, y))*w + x];
+    for(let y=0; y<h; y++){ out[y*w+x] = acc/k; acc += tmp[Math.min(h-1, y+r+1)*w + x] - tmp[Math.max(0, y-r)*w + x]; } }
+  return out;
+}
+async function prepImage(src, blur){
   const w0 = src.width, h0 = src.height, big = Math.max(w0, h0);
-  const s = big < 1000 ? 1000/big : Math.min(1, 1600/big);
+  const s = big < 1000 ? 1000/big : Math.min(1, 1700/big);
   const w = Math.round(w0*s), h = Math.round(h0*s);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d'); ctx.drawImage(src, 0, 0, w, h);
-  const img = ctx.getImageData(0, 0, w, h), d = img.data, hist = new Uint32Array(256);
-  for(let i=0; i<d.length; i+=4){ const y = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0; d[i] = y; hist[y]++; }
+  const img = ctx.getImageData(0, 0, w, h), d = img.data;
+  let g = new Float32Array(w*h);
+  for(let i=0, j=0; i<d.length; i+=4, j++) g[j] = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
+  if(blur) g = boxBlurGray(g, w, h, Math.max(1, Math.round(Math.max(w, h) / 1100)));
+  const hist = new Uint32Array(256); for(let j=0; j<g.length; j++) hist[g[j] | 0]++;
   const total = w*h; let acc = 0, lo = 0, hi = 255;
   for(let v=0; v<256; v++){ acc += hist[v]; if(acc > total*0.02){ lo = v; break; } }
   acc = 0; for(let v=255; v>=0; v--){ acc += hist[v]; if(acc > total*0.02){ hi = v; break; } }
   const range = Math.max(1, hi - lo);
-  for(let i=0; i<d.length; i+=4){ let y = (d[i]-lo)*255/range; y = y<0 ? 0 : y>255 ? 255 : y; d[i] = d[i+1] = d[i+2] = y; }
+  for(let i=0, j=0; i<d.length; i+=4, j++){ let y = (g[j]-lo)*255/range; y = y<0 ? 0 : y>255 ? 255 : y; d[i] = d[i+1] = d[i+2] = y; }
   ctx.putImageData(img, 0, 0);
   return c;
 }
@@ -1155,46 +1168,117 @@ function extractNames(text){
   });
   return out.sort((a,b) => b.length - a.length).slice(0, 4);
 }
-/* --- leitura com IA (servidor /api/ler-produto na Vercel) --- */
-async function imageToDataUrl(file){
-  let src;
-  try{ src = await createImageBitmap(file); }
-  catch(e){ src = await new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = rej; img.src = URL.createObjectURL(file); }); }
-  const s = Math.min(1, 1400 / Math.max(src.width, src.height));
-  const c = document.createElement('canvas'); c.width = Math.round(src.width*s); c.height = Math.round(src.height*s);
-  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
-  return c.toDataURL('image/jpeg', 0.85);
+/* --- leitor de produtos: acha preço, nome, marca e peso pela posição das palavras --- */
+const KNOWN_BRANDS = ['Friato','Avenorte','Sadia','Perdigão','Seara','Aurora','Swift','Friboi','Copacol','Frimesa','Italac','Piracanjuba','Parmalat','Nestlé','Ninho','Itambé','Elegê','Tirolez','Vigor','Danone','Batavo','Président','Polenghi','Qualy','Doriana','Tio João','Camil','Kicaldo','Prato Fino','Namorado','Broto Legal','União','Caravelas','Da Barra','Liza','Soya','Salada','Gallo','Andorinha','Pilão','Melitta','3 Corações','Santa Clara','Café do Ponto','Toddy','Nescau','Dona Benta','Renata','Adria','Barilla','Galo','Vitarella','Piraquê','Marilan','Bauducco','Mabel','Fortaleza','Heinz','Hellmann\'s','Quero','Elefante','Fugini','Knorr','Maggi','Sazón','Kitano','Gomes da Costa','Coqueiro','Pomarola','Coca-Cola','Guaraná Antarctica','Pepsi','Fanta','Sprite','Del Valle','Maguary','Skol','Brahma','Heineken','Ypê','Omo','Brilhante','Ariel','Tixan','Comfort','Downy','Minuano','Limpol','Veja','Pinho Sol','Qboa','Bombril','Scott','Neve','Personal','Dove','Lux','Palmolive','Protex','Colgate','Oral-B','Sorriso','Close Up','Rexona','Nivea','Seda','Pantene','Elseve','Pampers','Huggies','MamyPoko','Always','Intimus','Kotex','Wickbold','Pullman','Plus Vita','Visconti','Lacta','Garoto','Arcor','Trakinas','Oreo','Bis','Kinder','Sadia Hot Pocket','Mezzani','Yoki','Kodilar','Qualitá','Great Value'];
+
+function wordsToLines(words){
+  const ws = words.slice().sort((a,b) => (a.b.y0+a.b.y1)/2 - (b.b.y0+b.b.y1)/2);
+  const lines = [];
+  ws.forEach(w => {
+    const cy = (w.b.y0+w.b.y1)/2, h = w.b.y1 - w.b.y0;
+    const ln = lines.find(l => Math.abs(l.cy - cy) < Math.max(h, l.h) * 0.6);
+    if(ln){ ln.words.push(w); ln.y0 = Math.min(ln.y0, w.b.y0); ln.y1 = Math.max(ln.y1, w.b.y1); ln.h = ln.y1 - ln.y0; ln.cy = (ln.y0+ln.y1)/2; }
+    else lines.push({ words:[w], y0:w.b.y0, y1:w.b.y1, h, cy });
+  });
+  lines.forEach(l => { l.words.sort((a,b) => a.b.x0 - b.b.x0); l.text = l.words.map(w => w.t).join(' ').replace(/\s+/g,' ').trim(); l.conf = l.words.reduce((s,w)=>s+w.c,0)/l.words.length; });
+  return lines.sort((a,b) => a.y0 - b.y0);
 }
+const PRICE_WORD = /(\d{1,4})[.,](\d{2})(?!\d)/;
+const STOP_LINE = /(adicionar|carrinho|limitado|comprar|ver mais|frete|entrega|favorit|desconto|economize|sem juros|cupom|parcel|estoque|avalia)/i;
+const letters = s => (String(s).match(/[A-Za-zÀ-ÿ]/g) || []).length;
+
+function editDistance(a, b){
+  if(Math.abs(a.length - b.length) > 1) return 9;
+  const dp = Array.from({length: a.length+1}, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for(let j=1; j<=b.length; j++) dp[0][j] = j;
+  for(let i=1; i<=a.length; i++) for(let j=1; j<=b.length; j++)
+    dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return dp[a.length][b.length];
+}
+function splitBrandAndPack(full, knownBrands){
+  let name = ' ' + full.replace(/\s+/g,' ').trim() + ' ';
+  let pack = '';
+  const pm = name.match(/\s(?:aprox\.?\s*)?(\d+(?:[.,]\d+)?)\s?(kg|g|gr|ml|l|lt)\b\.?/i);
+  if(pm){
+    const u = pm[2].toLowerCase(); const unit = u==='gr' ? 'g' : (u==='l'||u==='lt') ? 'L' : u;
+    pack = `${pm[1].replace('.',',')} ${unit}`;
+    name = name.replace(pm[0], ' ');
+  }
+  name = name.replace(/\baprox\.?/ig,' ').replace(/\bIQF\b/g,' ');
+  // marca: compara palavra por palavra, aceitando 1 letra lida errada (ex: "Fhiato" = Friato)
+  let brand = '';
+  const parts = name.trim().split(/\s+/);
+  const all = [...new Set([...(knownBrands||[]), ...KNOWN_BRANDS])].filter(Boolean).sort((a,b) => b.length - a.length);
+  outer: for(const br of all){
+    const bparts = norm(br).split(' ');
+    const total = bparts.join('').length; if(total < 2) continue;
+    for(let i=0; i<=parts.length-bparts.length; i++){
+      const cand = parts.slice(i, i+bparts.length).map(norm).join(' ');
+      const dist = editDistance(cand, bparts.join(' '));
+      if(dist === 0 || (dist === 1 && total >= 5)){ brand = br; parts.splice(i, bparts.length); break outer; }
+    }
+  }
+  name = ' ' + parts.join(' ') + ' ';
+  name = name.replace(/\s+/g,' ').replace(/^[\s\-–,.:]+|[\s\-–,.:]+$/g,'').trim();
+  return { name: cap(name.toLowerCase()), brand, pack };
+}
+
+/* recebe as palavras lidas (com posição) e devolve produtos {nome, marca, pack, preco, porKg} */
+function productsFromWords(words, imgW, knownBrands){
+  const good = words.filter(w => w.t && w.t.trim());
+  // 1. achar os preços
+  const anchors = [];
+  good.forEach((w, i) => {
+    const m = w.t.match(PRICE_WORD); if(!m) return;
+    const v = parseFloat(m[1]+'.'+m[2]); if(!(v > 0 && v < 10000)) return;
+    const next = good[i+1];
+    const perKg = /\/\s*(kg|l)\b/i.test(w.t) || (next && /^\/?\s*(kg|l)\b/i.test(next.t) && Math.abs(next.b.y0 - w.b.y0) < 30);
+    anchors.push({ v, perKg, b: w.b, cx: (w.b.x0+w.b.x1)/2 });
+  });
+  const mains = anchors.filter(a => !a.perKg);
+  if(!mains.length) return [];
+  // 2. cada preço define uma coluna (meio do caminho até o vizinho da mesma altura)
+  const products = [];
+  mains.forEach(a => {
+    const row = mains.filter(o => Math.abs((o.b.y0+o.b.y1)/2 - (a.b.y0+a.b.y1)/2) < (a.b.y1-a.b.y0)*1.5).sort((x,y)=>x.cx-y.cx);
+    const idx = row.indexOf(a);
+    const left = idx > 0 ? (row[idx-1].cx + a.cx)/2 : 0;
+    const right = idx < row.length-1 ? (row[idx+1].cx + a.cx)/2 : (imgW || 1e9);
+    const top = Math.max(0, ...mains.filter(o => o !== a && o.b.y1 < a.b.y0 && o.cx > left && o.cx < right).map(o => o.b.y1));
+    const colWords = good.filter(w => { const cx = (w.b.x0+w.b.x1)/2; return cx > left && cx < right && w.b.y1 <= a.b.y0 + 2 && w.b.y0 >= top; });
+    // linhas acima do preço; pega o bloco de texto mais perto (título)
+    const lines = wordsToLines(colWords).filter(l => l.conf >= 55 && letters(l.text) >= 3 && letters(l.text)/l.text.length > 0.45 && !STOP_LINE.test(l.text) && !PRICE_WORD.test(l.text.replace(/\d+[.,]?\d*\s?(kg|g|ml|l)\b/ig,'')));
+    if(!lines.length) return;
+    const block = [lines[lines.length-1]];
+    for(let i = lines.length-2; i >= 0 && block.length < 3; i--){
+      const below = block[0], cur = lines[i];
+      if(below.y0 - cur.y1 < Math.max(cur.h, below.h) * 0.9) block.unshift(cur); else break;
+    }
+    // preço por kg logo abaixo, na mesma coluna
+    const kg = anchors.find(o => o.perKg && o.cx > left && o.cx < right && o.b.y0 > a.b.y0 && o.b.y0 - a.b.y1 < (a.b.y1-a.b.y0)*6);
+    const sp = splitBrandAndPack(block.map(l => l.text).join(' '), knownBrands);
+    if(letters(sp.name) < 3) return;
+    products.push({ ...sp, preco: a.v, porKg: kg ? kg.v : null, y: a.b.y0, x: a.cx });
+  });
+  return products.sort((p,q) => (Math.abs(p.y-q.y) < 90 ? p.x-q.x : p.y-q.y));
+}
+
 function productToItem(p){
-  const nome = String(p.nome || '').trim(); if(!nome) return null;
-  const preco = parseNum(p.preco), porKg = parseNum(p.preco_por_kg);
-  const tam = parseNum(p.tamanho), un = p.unidade_tamanho;
-  const pack = tam ? `${fmtQty(tam)} ${un === 'l' ? 'L' : (un || '')}`.trim() : '';
-  const h = buildHistory().get(norm(nome));
-  const vendeNoKg = preco === null && porKg !== null;
+  if(!p.name) return null;
+  const h = buildHistory().get(norm(p.name));
+  const kgOnly = p.preco === null && p.porKg !== null;
   return {
-    id: uid('i'), name: cap(nome), brand: String(p.marca || '').trim(), pack: vendeNoKg ? '' : pack,
-    qty: 1, unit: vendeNoKg ? 'kg' : 'un', unitPrice: vendeNoKg ? round2(porKg) : (preco === null ? null : round2(preco)),
-    category: CATEGORIES.some(c => c.id === p.categoria) ? p.categoria : (h ? h.category : guessCategory(nome)),
-    priority: h ? (h.priority || 'normal') : 'normal', bought: false,
+    id: uid('i'), name: p.name, brand: p.brand || (h ? h.brand || '' : ''), pack: kgOnly ? '' : (p.pack || ''),
+    qty: 1, unit: kgOnly ? 'kg' : 'un', unitPrice: kgOnly ? round2(p.porKg) : (p.preco === null ? null : round2(p.preco)),
+    category: h ? h.category : guessCategory(p.name), priority: h ? (h.priority || 'normal') : 'normal', bought: false,
   };
 }
-async function readWithAI(file){
-  const image = await imageToDataUrl(file);
-  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 45000);
-  try{
-    const r = await fetch('api/ler-produto', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ image }), signal: ctrl.signal });
-    if(r.status === 501) return { notConfigured: true };
-    if(!r.ok) throw new Error('http ' + r.status);
-    const data = await r.json();
-    return { items: (data.produtos || []).map(productToItem).filter(Boolean) };
-  } finally { clearTimeout(timer); }
-}
+function knownBrandsFromHistory(){ return [...new Set(liveLists().flatMap(l => l.items.map(i => i.brand)).filter(Boolean))]; }
 function openPhotoChooser(){
   state.sheet = { type:'chooser', draft:{} };
   openSheetHtml(`
     <p class="overlay-title">📷 Foto do produto</p>
-    <p class="overlay-sub">Etiqueta da prateleira, embalagem ou print do site do mercado. Eu leio nome, marca, peso e preço.</p>
+    <p class="overlay-sub">Etiqueta da prateleira, panfleto ou print do site do mercado. Eu leio nome, marca, peso e preço — grátis, no seu celular.</p>
     <button class="modal-btn" data-act="photo-camera"><b>📸 Tirar foto agora</b><span>Abre a câmera</span></button>
     <button class="modal-btn" data-act="photo-gallery"><b>🖼️ Escolher da galeria</b><span>Fotos ou prints que você já tem</span></button>
     <button class="ghost-btn" data-act="sheet-close">Cancelar</button>`);
@@ -1229,33 +1313,35 @@ function addMultiProducts(){
   toast(`${chosen.length} ${chosen.length>1?'produtos adicionados':'produto adicionado'} ✅`, 'Desfazer', () => { l.items = before; l.status = beforeStatus; touch(l); refreshListParts(); }, 6000);
 }
 async function handlePhoto(file){
-  toast('🔎 Lendo a foto…', null, null, 60000);
-  let ai = null;
-  try{ ai = await readWithAI(file); }catch(e){ console.warn('IA indisponível:', e); }
-  if(ai && ai.items){
-    hideToast();
-    if(!ai.items.length){ toast('Não achei produto nessa foto. Tente mais de perto.', null, null, 4000); return; }
-    if(ai.items.length === 1) openItemSheet(null, ai.items[0]);
-    else openMultiSheet(ai.items);
-    return;
-  }
-  // reserva: leitor simples no próprio celular (bom só para etiqueta impressa)
+  toast('🔎 Lendo a foto… (leva uns segundos)', null, null, 90000);
   try{
-    toast('📷 Lendo etiqueta… (precisa de internet)', null, null, 60000);
     await loadTesseract();
-    const canvas = await prepImage(file);
-    const res = await Tesseract.recognize(canvas, 'por');
-    const text = (res && res.data && res.data.text) || '';
-    const prices = extractPrices(text), names = extractNames(text);
+    const src = await loadBitmap(file);
+    const brands = knownBrandsFromHistory();
+    let lastText = '';
+    // 1ª leitura com desfoque leve (bom para foto de tela e foto tremida); 2ª sem desfoque (print e etiqueta nítida)
+    for(const blur of [true, false]){
+      const canvas = await prepImage(src, blur);
+      const res = await Tesseract.recognize(canvas, 'por');
+      const data = (res && res.data) || {};
+      lastText = data.text || lastText;
+      const words = (data.words || []).map(w => ({ t: w.text, c: w.confidence, b: w.bbox }));
+      const items = productsFromWords(words, canvas.width, brands).map(productToItem).filter(Boolean).slice(0, 12);
+      if(items.length){
+        hideToast();
+        if(items.length === 1) openItemSheet(null, items[0]); else openMultiSheet(items);
+        return;
+      }
+    }
+    // não achou preço junto de nome: mostra o que conseguiu ler pra você escolher
     hideToast();
-    const preset = { name: names[0] || '', qty: 1, unit: 'un', unitPrice: prices.length ? prices[0] : null, category: names[0] ? guessCategory(names[0]) : 'mercearia', priority: 'normal' };
-    const h = names[0] && buildHistory().get(norm(names[0]));
-    if(h){ preset.category = h.category; preset.unit = h.unit; preset.name = h.name; }
-    openItemSheet(null, preset, { names, prices });
+    const prices = extractPrices(lastText), names = extractNames(lastText);
+    const sp = names[0] ? splitBrandAndPack(names[0], brands) : { name:'', brand:'', pack:'' };
+    openItemSheet(null, { name: sp.name, brand: sp.brand, pack: sp.pack, qty: 1, unit: 'un', unitPrice: prices.length ? prices[0] : null, category: sp.name ? guessCategory(sp.name) : 'mercearia', priority: 'normal' }, { names, prices });
   }catch(e){
     console.warn(e);
     hideToast();
-    toast('Não consegui ler a foto agora. Tente com mais luz ou digite.', null, null, 4000);
+    toast('Não consegui ler a foto agora. Precisa de internet na 1ª vez.', null, null, 4000);
   }
 }
 
