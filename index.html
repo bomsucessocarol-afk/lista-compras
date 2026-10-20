@@ -228,6 +228,7 @@
 
 <div id="toast" class="toast" role="status"></div>
 <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
+<input type="file" id="gallery-input" accept="image/*" hidden />
 
 <script>
 'use strict';
@@ -376,6 +377,8 @@ function normalizeLists(raw){
         unitPrice: price,
         bought: !!it.bought,
         priority: PRIO_ORDER[it.priority] !== undefined ? it.priority : 'normal',
+        brand: String(it.brand || '').trim(),
+        pack: String(it.pack || '').trim(),
       };
     }),
   }));
@@ -519,7 +522,7 @@ function buildHistory(){
       const k = norm(it.name); if(!k) continue;
       let h = map.get(k);
       if(!h){ h = { key:k, count:0, unitPrice:null }; map.set(k, h); }
-      h.name = it.name; h.category = it.category; h.unit = it.unit; h.priority = it.priority;
+      h.name = it.name; h.category = it.category; h.unit = it.unit; h.priority = it.priority; h.brand = it.brand || ''; h.pack = it.pack || '';
       if(it.unitPrice !== null) h.unitPrice = it.unitPrice;
       if(!seen.has(k)){ h.count++; seen.add(k); }
     }
@@ -633,7 +636,7 @@ function renderList(){
         </div>
         <div class="quick-tools">
           <button data-act="import">📋 Lista do papel</button>
-          <button data-act="photo">📷 Etiqueta</button>
+          <button data-act="photo">📷 Foto</button>
           <button data-act="new-detailed">📝 Detalhes</button>
         </div>
         <div id="sugg-box"></div>
@@ -687,7 +690,8 @@ function sortPrio(a,b){ return (PRIO_ORDER[a.priority]??1) - (PRIO_ORDER[b.prior
 function rowHtml(it){
   const sub = itemSub(it);
   const prio = it.priority || 'normal';
-  const detail = `${fmtQty(it.qty)} ${it.unit}` + (it.unitPrice !== null ? ` · ${brl(it.unitPrice)}${it.unit!=='un' ? '/'+it.unit : ' cada'}` : '');
+  const extra = [it.brand, it.pack].filter(Boolean).map(esc).join(' · ');
+  const detail = (extra ? extra + ' · ' : '') + `${fmtQty(it.qty)} ${it.unit}` + (it.unitPrice !== null ? ` · ${brl(it.unitPrice)}${it.unit!=='un' ? '/'+it.unit : ' cada'}` : '');
   return `
     <div class="item-row ${it.bought?'bought':''}">
       <button class="chk ${it.bought?'on':''}" data-act="toggle" data-id="${esc(it.id)}" aria-label="Marcar como comprado">${it.bought?'✓':''}</button>
@@ -838,11 +842,13 @@ function buildItemFromName(name, qty, unit){
     unitPrice: h ? h.unitPrice : null,
     bought: false,
     priority: h ? (h.priority || 'normal') : 'normal',
+    brand: h ? (h.brand || '') : '',
+    pack: h ? (h.pack || '') : '',
   };
 }
 function addItemToActive(item, quiet){
   const l = active(); if(!l) return;
-  const ex = l.items.find(i => !i.bought && norm(i.name) === norm(item.name) && i.unit === item.unit);
+  const ex = l.items.find(i => !i.bought && norm(i.name) === norm(item.name) && i.unit === item.unit && norm(i.brand) === norm(item.brand));
   if(ex){
     ex.qty = round3((Number(ex.qty)||0) + (Number(item.qty)||1));
     touch(l); refreshListParts();
@@ -921,7 +927,7 @@ function openItemSheet(id, preset, ocr){
   const l = active(); if(!l) return;
   const it = id ? l.items.find(i => i.id === id) : null;
   const base = it || preset || { name:'', category:'mercearia', qty:1, unit:'un', unitPrice:null, priority:'normal' };
-  const d = { name: base.name || '', qty: numToInput(base.qty || 1), unit: base.unit || 'un', price: numToInput(base.unitPrice), category: base.category || 'mercearia', priority: base.priority || 'normal' };
+  const d = { brand: base.brand || '', pack: base.pack || '', name: base.name || '', qty: numToInput(base.qty || 1), unit: base.unit || 'un', price: numToInput(base.unitPrice), category: base.category || 'mercearia', priority: base.priority || 'normal' };
   state.sheet = { type:'item', id: it ? it.id : null, draft: d };
 
   const ocrHtml = ocr ? `
@@ -936,6 +942,10 @@ function openItemSheet(id, preset, ocr){
     ${ocrHtml}
     <label class="form-label" for="d-name">Produto</label>
     <input class="text-input" id="d-name" data-draft="name" value="${esc(d.name)}" placeholder="Ex: Peito de frango" autocapitalize="sentences" />
+    <div class="qty-row" style="margin-top:8px">
+      <input class="text-input" id="d-brand" data-draft="brand" value="${esc(d.brand)}" placeholder="Marca (opcional)" autocapitalize="words" />
+      <input class="text-input" id="d-pack" data-draft="pack" value="${esc(d.pack)}" placeholder="Peso/tamanho (ex: 920 g)" style="text-align:left;font-weight:400;font-size:16px" />
+    </div>
     <span class="form-label">Quantidade</span>
     <div class="qty-row">
       <button class="step" data-act="qty-dec" aria-label="Menos">−</button>
@@ -973,7 +983,7 @@ function saveItemSheet(){
   const name = d.name.trim();
   if(!name){ const f = document.getElementById('d-name'); if(f){ f.focus(); f.style.borderColor = '#E74C3C'; } return; }
   const qty = parseNum(d.qty), price = parseNum(d.price);
-  const data = { name: cap(name), qty: qty > 0 ? round3(qty) : 1, unit: d.unit, unitPrice: price === null ? null : round2(price), category: d.category, priority: d.priority };
+  const data = { brand: d.brand.trim(), pack: d.pack.trim(), name: cap(name), qty: qty > 0 ? round3(qty) : 1, unit: d.unit, unitPrice: price === null ? null : round2(price), category: d.category, priority: d.priority };
   if(s.id){
     const it = l.items.find(i => i.id === s.id);
     if(it){ Object.assign(it, data); touch(l); refreshListParts(); }
@@ -1145,9 +1155,93 @@ function extractNames(text){
   });
   return out.sort((a,b) => b.length - a.length).slice(0, 4);
 }
-async function handlePhoto(file){
-  toast('📷 Lendo etiqueta… (precisa de internet)', null, null, 60000);
+/* --- leitura com IA (servidor /api/ler-produto na Vercel) --- */
+async function imageToDataUrl(file){
+  let src;
+  try{ src = await createImageBitmap(file); }
+  catch(e){ src = await new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = rej; img.src = URL.createObjectURL(file); }); }
+  const s = Math.min(1, 1400 / Math.max(src.width, src.height));
+  const c = document.createElement('canvas'); c.width = Math.round(src.width*s); c.height = Math.round(src.height*s);
+  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85);
+}
+function productToItem(p){
+  const nome = String(p.nome || '').trim(); if(!nome) return null;
+  const preco = parseNum(p.preco), porKg = parseNum(p.preco_por_kg);
+  const tam = parseNum(p.tamanho), un = p.unidade_tamanho;
+  const pack = tam ? `${fmtQty(tam)} ${un === 'l' ? 'L' : (un || '')}`.trim() : '';
+  const h = buildHistory().get(norm(nome));
+  const vendeNoKg = preco === null && porKg !== null;
+  return {
+    id: uid('i'), name: cap(nome), brand: String(p.marca || '').trim(), pack: vendeNoKg ? '' : pack,
+    qty: 1, unit: vendeNoKg ? 'kg' : 'un', unitPrice: vendeNoKg ? round2(porKg) : (preco === null ? null : round2(preco)),
+    category: CATEGORIES.some(c => c.id === p.categoria) ? p.categoria : (h ? h.category : guessCategory(nome)),
+    priority: h ? (h.priority || 'normal') : 'normal', bought: false,
+  };
+}
+async function readWithAI(file){
+  const image = await imageToDataUrl(file);
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 45000);
   try{
+    const r = await fetch('api/ler-produto', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ image }), signal: ctrl.signal });
+    if(r.status === 501) return { notConfigured: true };
+    if(!r.ok) throw new Error('http ' + r.status);
+    const data = await r.json();
+    return { items: (data.produtos || []).map(productToItem).filter(Boolean) };
+  } finally { clearTimeout(timer); }
+}
+function openPhotoChooser(){
+  state.sheet = { type:'chooser', draft:{} };
+  openSheetHtml(`
+    <p class="overlay-title">📷 Foto do produto</p>
+    <p class="overlay-sub">Etiqueta da prateleira, embalagem ou print do site do mercado. Eu leio nome, marca, peso e preço.</p>
+    <button class="modal-btn" data-act="photo-camera"><b>📸 Tirar foto agora</b><span>Abre a câmera</span></button>
+    <button class="modal-btn" data-act="photo-gallery"><b>🖼️ Escolher da galeria</b><span>Fotos ou prints que você já tem</span></button>
+    <button class="ghost-btn" data-act="sheet-close">Cancelar</button>`);
+}
+function openMultiSheet(items){
+  state.sheet = { type:'multi', draft:{}, items, off: new Set() };
+  openSheetHtml(`
+    <p class="overlay-title">Encontrei ${items.length} produtos</p>
+    <p class="overlay-sub">Toque pra tirar algum. Use ✏️ pra conferir um antes de adicionar.</p>
+    ${items.map((it, i) => `
+      <div class="item-row" style="border-top:${i ? '1px solid #F0F1F6' : 'none'}">
+        <button class="chk on" data-act="multi-toggle" data-idx="${i}">✓</button>
+        <div class="item-main">
+          <div class="item-name">${catById(it.category).emoji} ${esc(it.name)}</div>
+          <div class="item-detail">${[it.brand, it.pack].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div>
+        </div>
+        <div class="item-sub">${it.unitPrice === null ? '—' : brl(it.unitPrice) + (it.unit === 'kg' ? '/kg' : '')}</div>
+        <button class="hist-del" data-act="multi-edit" data-idx="${i}" aria-label="Conferir">✏️</button>
+      </div>`).join('')}
+    <div class="sheet-actions">
+      <button class="cta" data-act="multi-add" id="multi-add-btn">Adicionar ${items.length} produtos</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+function addMultiProducts(){
+  const s = state.sheet, l = active(); if(!l) return;
+  const chosen = s.items.filter((_, i) => !s.off.has(i)); if(!chosen.length) return;
+  const before = JSON.parse(JSON.stringify(l.items)), beforeStatus = l.status;
+  closeSheet();
+  chosen.forEach(it => addItemToActive({ ...it, id: uid('i') }, true));
+  hideToast();
+  toast(`${chosen.length} ${chosen.length>1?'produtos adicionados':'produto adicionado'} ✅`, 'Desfazer', () => { l.items = before; l.status = beforeStatus; touch(l); refreshListParts(); }, 6000);
+}
+async function handlePhoto(file){
+  toast('🔎 Lendo a foto…', null, null, 60000);
+  let ai = null;
+  try{ ai = await readWithAI(file); }catch(e){ console.warn('IA indisponível:', e); }
+  if(ai && ai.items){
+    hideToast();
+    if(!ai.items.length){ toast('Não achei produto nessa foto. Tente mais de perto.', null, null, 4000); return; }
+    if(ai.items.length === 1) openItemSheet(null, ai.items[0]);
+    else openMultiSheet(ai.items);
+    return;
+  }
+  // reserva: leitor simples no próprio celular (bom só para etiqueta impressa)
+  try{
+    toast('📷 Lendo etiqueta… (precisa de internet)', null, null, 60000);
     await loadTesseract();
     const canvas = await prepImage(file);
     const res = await Tesseract.recognize(canvas, 'por');
@@ -1161,7 +1255,7 @@ async function handlePhoto(file){
   }catch(e){
     console.warn(e);
     hideToast();
-    toast('Não consegui ler a etiqueta agora. Tente com mais luz ou digite.', null, null, 4000);
+    toast('Não consegui ler a foto agora. Tente com mais luz ou digite.', null, null, 4000);
   }
 }
 
@@ -1218,7 +1312,19 @@ document.addEventListener('click', e => {
     case 'close-overlays': closeOverlays(); break;
     case 'quick-add': addQuick(); break;
     case 'sugg': addFromHistory(el.dataset.key); break;
-    case 'photo': document.getElementById('photo-input').click(); break;
+    case 'photo': openPhotoChooser(); break;
+    case 'photo-camera': closeSheet(); document.getElementById('photo-input').click(); break;
+    case 'photo-gallery': closeSheet(); document.getElementById('gallery-input').click(); break;
+    case 'multi-toggle': {
+      const i = Number(el.dataset.idx), off = state.sheet.off;
+      off.has(i) ? off.delete(i) : off.add(i);
+      el.classList.toggle('on', !off.has(i)); el.textContent = off.has(i) ? '' : '✓';
+      const n = state.sheet.items.length - off.size, btn = document.getElementById('multi-add-btn');
+      btn.disabled = !n; btn.style.opacity = n ? '1' : '.5'; btn.textContent = n ? `Adicionar ${n} ${n>1?'produtos':'produto'}` : 'Adicionar';
+      break;
+    }
+    case 'multi-add': addMultiProducts(); break;
+    case 'multi-edit': { const it = state.sheet.items[Number(el.dataset.idx)]; closeSheet(); openItemSheet(null, it); break; }
     case 'import': openImportSheet(); break;
     case 'imp-paste': {
       const ta = document.getElementById('d-imp');
@@ -1305,11 +1411,11 @@ document.addEventListener('keydown', e => {
     else if(state.sheet.type === 'list') saveListSheet();
   }
 });
-document.getElementById('photo-input').addEventListener('change', e => {
+['photo-input','gallery-input'].forEach(id => document.getElementById(id).addEventListener('change', e => {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
   if(file) handlePhoto(file);
-});
+}));
 
 /* =========================================================
    CALCULADORA (não mexe na lista)
