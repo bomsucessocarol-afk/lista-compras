@@ -30,7 +30,7 @@
   html,body{margin:0;padding:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",'Segoe UI',Roboto,Arial,sans-serif;color:var(--navy);line-height:1.4;}
   #app{max-width:440px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:110px;}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;padding:0;}
-  input,select{font-family:inherit;}
+  input,select,textarea{font-family:inherit;}
 
   /* header */
   .header{background:var(--navy);padding:calc(env(safe-area-inset-top) + 26px) 20px 34px;border-radius:0 0 26px 26px;color:#fff;position:relative;}
@@ -342,6 +342,8 @@ function parseQuick(text){
   if(m) return { qty: parseNum(m[1]), unit: mapUnit(m[2]), name: m[3].replace(/^de\s+/i,'').trim() };
   m = t.match(new RegExp('^(.+?)\\s+(\\d+(?:[.,]\\d+)?)\\s*'+UNIT_RE+'?$','i'));
   if(m) return { qty: parseNum(m[2]), unit: mapUnit(m[3]), name: m[1].trim() };
+  m = t.match(/^(.+?)\s+x\s*(\d+(?:[.,]\d+)?)$/i);
+  if(m) return { qty: parseNum(m[2]), unit: null, name: m[1].trim() };
   m = t.match(/^x\s*(\d+)\s+(.+)$/i);
   if(m) return { qty: Number(m[1]), unit: null, name: m[2].trim() };
   return { qty: null, unit: null, name: t };
@@ -630,8 +632,9 @@ function renderList(){
           <button class="quick-add keep-focus" data-act="quick-add" aria-label="Adicionar">+</button>
         </div>
         <div class="quick-tools">
-          <button data-act="photo">📷 Ler etiqueta</button>
-          <button data-act="new-detailed">📝 Item com detalhes</button>
+          <button data-act="import">📋 Lista do papel</button>
+          <button data-act="photo">📷 Etiqueta</button>
+          <button data-act="new-detailed">📝 Detalhes</button>
         </div>
         <div id="sugg-box"></div>
       </div>
@@ -1003,6 +1006,59 @@ function savePriceSheet(){
   closeSheet();
 }
 
+/* --- importar lista do papel (texto copiado da foto ou digitado) --- */
+function parseImport(text){
+  let lines = String(text||'').split(/\r?\n/);
+  if(lines.filter(l => l.trim()).length === 1) lines = lines[0].split(/[,;]/);
+  const out = [];
+  lines.forEach(line => {
+    let t = line.replace(/^\s*(?:[-–—•*·>+]|\[\s*[xX]?\s*\]|[☐☑✓✔□■●○]|\d{1,2}\s*[.)-](?=\s))\s*/, '').replace(/\s+/g,' ').trim();
+    if((t.match(/[A-Za-zÀ-ÿ]/g) || []).length < 2) return;
+    if(/^(lista( de compras)?|compras|mercado|feira|supermercado)\s*:?$/.test(norm(t))) return;
+    const p = parseQuick(t);
+    if(!p.name || (p.name.match(/[A-Za-zÀ-ÿ]/g) || []).length < 2) return;
+    out.push(buildItemFromName(p.name, p.qty, p.unit));
+  });
+  return out;
+}
+function openImportSheet(){
+  state.sheet = { type:'import', draft:{ text:'' }, parsed:[], off: new Set() };
+  openSheetHtml(`
+    <p class="overlay-title">📋 Lista do papel</p>
+    <div class="ocr-box">
+      <span class="form-label">Como copiar o texto da foto (rapidinho)</span>
+      <p><b>iPhone:</b> abra a foto na Galeria → toque no ícone de texto ▢ no canto → <b>Selecionar Tudo</b> → <b>Copiar</b>.</p>
+      <p style="margin-top:6px"><b>Android:</b> abra a foto → <b>Lens</b> → <b>Texto</b> → <b>Selecionar tudo</b> → <b>Copiar</b>.</p>
+      <p style="margin-top:6px">Depois volte aqui e cole 👇 (ou digite, um item por linha)</p>
+    </div>
+    <button class="ghost-btn" data-act="imp-paste" style="margin-top:4px;background:#EEF3FB;color:var(--navy)">📋 Colar o que copiei</button>
+    <textarea class="text-input" id="d-imp" data-draft="text" rows="6" placeholder="2 kg frango&#10;leite&#10;3 detergente&#10;banana" style="margin-top:10px;resize:vertical"></textarea>
+    <div id="imp-preview"></div>
+    <div class="sheet-actions">
+      <button class="cta" data-act="imp-add" id="imp-add-btn" disabled style="opacity:.5">Adicionar itens</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+function updateImportPreview(){
+  const s = state.sheet; if(!s || s.type !== 'import') return;
+  s.parsed = parseImport(s.draft.text);
+  const box = document.getElementById('imp-preview'), btn = document.getElementById('imp-add-btn');
+  const n = s.parsed.filter((_, i) => !s.off.has(i)).length;
+  if(box) box.innerHTML = s.parsed.length ? `
+    <span class="form-label">Entendi ${s.parsed.length} ${s.parsed.length>1?'itens':'item'} — toque pra tirar algum</span>
+    <div class="chips">${s.parsed.map((it, i) => `<button class="chip ${s.off.has(i) ? '' : 'sel'}" data-act="imp-toggle" data-idx="${i}">${catById(it.category).emoji} ${it.qty !== 1 || it.unit !== 'un' ? fmtQty(it.qty)+' '+it.unit+' ' : ''}${esc(it.name)}</button>`).join('')}</div>` : '';
+  if(btn){ btn.disabled = !n; btn.style.opacity = n ? '1' : '.5'; btn.textContent = n ? `Adicionar ${n} ${n>1?'itens':'item'}` : 'Adicionar itens'; }
+}
+function addImported(){
+  const s = state.sheet, l = active(); if(!l) return;
+  const chosen = s.parsed.filter((_, i) => !s.off.has(i)); if(!chosen.length) return;
+  const before = JSON.parse(JSON.stringify(l.items)), beforeStatus = l.status;
+  closeSheet();
+  chosen.forEach(it => addItemToActive({ ...it, id: uid('i') }, true));
+  hideToast();
+  toast(`${chosen.length} ${chosen.length>1?'itens adicionados':'item adicionado'} ✅`, 'Desfazer', () => { l.items = before; l.status = beforeStatus; touch(l); refreshListParts(); }, 6000);
+}
+
 /* --- dados da lista --- */
 function openListSheet(){
   const l = active(); if(!l) return;
@@ -1163,6 +1219,24 @@ document.addEventListener('click', e => {
     case 'quick-add': addQuick(); break;
     case 'sugg': addFromHistory(el.dataset.key); break;
     case 'photo': document.getElementById('photo-input').click(); break;
+    case 'import': openImportSheet(); break;
+    case 'imp-paste': {
+      const ta = document.getElementById('d-imp');
+      if(navigator.clipboard && navigator.clipboard.readText){
+        navigator.clipboard.readText().then(t => {
+          if(!t) { toast('Nada copiado ainda — copie o texto da foto primeiro.', null, null, 3500); return; }
+          state.sheet.draft.text = (ta.value ? ta.value + '\n' : '') + t; ta.value = state.sheet.draft.text; updateImportPreview();
+        }).catch(() => { ta.focus(); toast('Toque e segure na caixa abaixo e escolha "Colar".', null, null, 3500); });
+      } else { ta.focus(); toast('Toque e segure na caixa abaixo e escolha "Colar".', null, null, 3500); }
+      break;
+    }
+    case 'imp-toggle': {
+      const i = Number(el.dataset.idx), off = state.sheet.off;
+      off.has(i) ? off.delete(i) : off.add(i);
+      updateImportPreview();
+      break;
+    }
+    case 'imp-add': addImported(); break;
     case 'new-detailed': {
       const p = parseQuick(state.quick);
       const preset = p.name ? buildItemFromName(p.name, p.qty, p.unit) : null;
@@ -1216,12 +1290,13 @@ document.addEventListener('input', e => {
   if(t.dataset && t.dataset.draft && state.sheet){
     state.sheet.draft[t.dataset.draft] = t.value;
     t.style.borderColor = '';
-    updatePreview();
+    if(state.sheet.type === 'import'){ state.sheet.off.clear(); updateImportPreview(); }
+    else updatePreview();
   }
 });
 document.addEventListener('keydown', e => {
   if(e.key === 'Escape'){ closeOverlays(); return; }
-  if(e.key !== 'Enter') return;
+  if(e.key !== 'Enter' || e.target.tagName === 'TEXTAREA') return;
   if(e.target.id === 'quick-input'){ e.preventDefault(); addQuick(); return; }
   if(e.target.dataset && e.target.dataset.draft && state.sheet){
     e.preventDefault();
