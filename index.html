@@ -213,6 +213,7 @@
   .ing-preview{margin-top:14px;background:#FFF3D6;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;}
   .ing-preview b{font-size:20px;color:var(--navy);}
   .ing-preview span{font-size:12px;color:#7A5800;font-weight:600;}
+  .prep-preview{margin:0;font-size:13px;color:var(--ink);background:var(--bg);border-radius:12px;padding:10px 12px;max-height:160px;overflow:auto;}
   .food-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 8px;}
 
   /* cardápio */
@@ -299,6 +300,7 @@
 <div id="toast" class="toast" role="status"></div>
 <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
 <input type="file" id="gallery-input" accept="image/*" hidden />
+<input type="file" id="recipe-photo-input" accept="image/*" hidden />
 
 <script>
 'use strict';
@@ -510,7 +512,7 @@ function normalizeRecipes(raw){
     id: String(r.id), name: String(r.name || 'Receita').trim(), portions: Number(r.portions) > 0 ? Number(r.portions) : 1,
     notes: String(r.notes || ''), updatedAt: Number(r.updatedAt) || 0, deleted: !!r.deleted,
     ingredients: (Array.isArray(r.ingredients) ? r.ingredients : []).filter(Boolean).map(i => ({
-      id: String(i.id || uid('g')), foodId: String(i.foodId || ''), name: String(i.name || 'Ingrediente'),
+      id: String(i.id || uid('g')), foodId: String(i.foodId || ''), name: String(i.name || 'Ingrediente'), srcName: String(i.srcName || ''),
       qty: Number(i.qty) > 0 ? Number(i.qty) : 0, unit: ING_UNITS[i.unit] ? i.unit : 'g',
       gPerUnit: Number(i.gPerUnit) > 0 ? Number(i.gPerUnit) : null, per100: per100Of(i.per100),
     })),
@@ -529,7 +531,8 @@ const activeRecipe = () => state.recipes.find(r => r.id === state.recipeId && !r
 
 function ingGrams(i){
   const u = ING_UNITS[i.unit] || ING_UNITS.g;
-  return (Number(i.qty) || 0) * (i.unit === 'un' ? (i.gPerUnit || 0) : u.g);
+  const per = (i.unit === 'un' || ['xic','cs','cc'].includes(i.unit)) && i.gPerUnit ? i.gPerUnit : (i.unit === 'un' ? 0 : u.g);
+  return (Number(i.qty) || 0) * per;
 }
 function ingNutri(i){
   const k = ingGrams(i) / 100, p = i.per100 || {};
@@ -557,6 +560,11 @@ function ensureTaco(){
   if(!tacoLoading){
     tacoLoading = fetch('taco.json').then(r => r.json()).then(rows => {
       TACO = rows.map(([id, name, kcal, p, c, f, fib]) => ({ id: 't' + id, name, n: norm(name), per100: { kcal, p, c, f, fib } }));
+      [['x1','Canela, em pó',247,4,81,1.2,53],['x2','Óleo, de coco',884,0,0,100,0],['x3','Sal, refinado',0,0,0,0,0],['x4','Pimenta-do-reino, em pó',251,10,64,3.3,25],
+       ['x5','Água',0,0,0,0,0],['x6','Vinagre',19,0,0.9,0,0],['x7','Chia, semente',486,17,42,31,34],['x8','Linhaça, semente',534,18,29,42,27],
+       ['x9','Whey protein (média)',400,80,8,6,0],['x10','Pasta de amendoim, integral',588,25,20,50,6],['x11','Cacau, em pó, 100%',228,20,58,14,37],
+       ['x12','Orégano, seco',265,9,69,4.3,42],['x13','Psyllium',200,2,85,0.6,71],['x14','Adoçante, culinário (sucralose)',0,0,0,0,0]]
+        .forEach(([id, name, kcal, p, c, f, fib]) => TACO.push({ id, name, n: norm(name), per100: { kcal, p, c, f, fib } }));
       if(state.sheet && state.sheet.type === 'ing') renderIngResults();
       return TACO;
     }).catch(e => { tacoLoading = null; throw e; });
@@ -565,7 +573,7 @@ function ensureTaco(){
 }
 function findFood(id){
   if(!id) return null;
-  if(id.startsWith('t')) return TACO ? TACO.find(f => f.id === id) : null;
+  if(/^[tx]\d/.test(id)) return TACO ? TACO.find(f => f.id === id) : null;
   return liveFoods().find(f => f.id === id) || null;
 }
 function searchFoods(q){
@@ -604,7 +612,8 @@ function renderRecipes(){
       <h1 class="h1">Receitas</h1>
       <p class="sub">Ingredientes, quantidades e calorias</p>
     </div>
-    <div class="section overlap"><button class="cta" data-act="new-recipe">+ Nova receita</button></div>
+    <div class="section overlap"><button class="cta" data-act="new-recipe">+ Nova receita</button>
+      <button class="ghost-btn" data-act="import-recipe" style="background:#fff;color:var(--navy);box-shadow:0 2px 10px rgba(27,26,51,.06)">📥 Importar de foto, print ou texto</button></div>
     <div class="section">
       ${all.length > 4 ? `<input class="quick-input" id="recipe-search" placeholder="🔎 Buscar receita ou ingrediente" value="${esc(state.recipeSearch)}" style="width:100%;margin-bottom:12px" />` : ''}
       ${all.length === 0 ? `<div class="empty" style="margin-top:6px">🍲<br/><br/>Nenhuma receita ainda.<br/>Toque em "Nova receita" e adicione os ingredientes —<br/>eu calculo as calorias.</div>` : ''}
@@ -683,8 +692,9 @@ function renderRecipeIngs(){
         <div class="item-main">
           <div class="item-name"><span style="overflow:hidden;text-overflow:ellipsis">${esc(i.name)}</span></div>
           <div class="item-detail">${ingQtyTxt(i)}${['g','ml'].includes(i.unit) ? '' : ' · ' + gTxt(n.g)}</div>
+          ${i.foodId ? '' : `<div class="item-detail" style="color:#9A6A00;font-weight:700">⚠️ Toque pra escolher o alimento da tabela</div>`}
         </div>
-        <div style="text-align:right"><div class="item-sub">${kcalTxt(n.kcal)}</div><div class="item-detail">${share}% do total</div></div>
+        <div style="text-align:right">${i.foodId ? `<div class="item-sub">${kcalTxt(n.kcal)}</div><div class="item-detail">${share}% do total</div>` : '<div class="item-sub">—</div>'}</div>
       </div>`;
   }).join('')}</div>`;
 }
@@ -751,8 +761,8 @@ function openIngSheet(ingId, target){
   state.ingTarget = target;
   const arr = ingTargetArray(target); if(!arr) return;
   const ing = ingId ? arr.find(i => i.id === ingId) : null;
-  state.sheet = { type: 'ing', target, ingId: ing ? ing.id : null, food: ing ? { id: ing.foodId, name: ing.name, per100: ing.per100 } : null,
-    draft: { q: '', qty: ing ? numToInput(ing.qty) : '100', unit: ing ? ing.unit : 'g', gpu: ing && ing.gPerUnit ? numToInput(ing.gPerUnit) : '' } };
+  state.sheet = { type: 'ing', target, ingId: ing ? ing.id : null, food: ing && ing.foodId ? { id: ing.foodId, name: ing.name, per100: ing.per100 } : null,
+    draft: { q: ing && !ing.foodId ? (ing.srcName || ing.name) : '', qty: ing ? numToInput(ing.qty) : '100', unit: ing ? ing.unit : 'g', gpu: ing && ing.gPerUnit ? numToInput(ing.gPerUnit) : '' } };
   renderIngSheet();
   ensureTaco().catch(() => { const b = document.getElementById('ing-results'); if(b) b.innerHTML = '<p class="hint">Sem internet pra carregar a tabela agora. Você pode criar o alimento abaixo.</p>'; });
 }
@@ -810,7 +820,7 @@ function renderIngResults(){
 }
 function updateIngPreview(){
   const el = document.getElementById('ing-preview'), s = state.sheet; if(!el || !s || !s.food) return;
-  const tmp = { qty: parseNum(s.draft.qty) || 0, unit: s.draft.unit, gPerUnit: parseNum(s.draft.gpu) || 0, per100: s.food.per100 };
+  const tmp = { qty: parseNum(s.draft.qty) || 0, unit: s.draft.unit, gPerUnit: s.draft.unit === 'un' ? (parseNum(s.draft.gpu) || 0) : measureGrams(s.food.name, s.draft.unit), per100: s.food.per100 };
   const n = ingNutri(tmp);
   el.innerHTML = `<b>${kcalTxt(n.kcal)}</b><span>${gTxt(n.g)} · proteína ${gTxt(n.p)} · carbo ${gTxt(n.c)} · gordura ${gTxt(n.f)}</span>`;
 }
@@ -818,7 +828,9 @@ function pickFood(id){
   const f = findFood(id); if(!f) return;
   state.sheet.food = { id: f.id, name: f.name, per100: per100Of(f.per100) };
   const d = state.sheet.draft;
+  const cur = state.sheet.ingId && ingTargetArray(state.sheet.target) ? ingTargetArray(state.sheet.target).find(x => x.id === state.sheet.ingId) : null;
   if(!state.sheet.ingId){ d.unit = 'g'; d.qty = '100'; d.gpu = numToInput(defaultUnitWeight(f.name)); }
+  else if(cur && !cur.foodId && d.unit === 'un' && !d.gpu) d.gpu = numToInput(cur.gPerUnit || defaultUnitWeight(f.name));
   renderIngSheet();
 }
 function saveIngSheet(){
@@ -828,7 +840,7 @@ function saveIngSheet(){
   const qty = parseNum(s.draft.qty);
   if(!(qty > 0)){ const f = document.getElementById('d-iqty'); if(f){ f.focus(); f.style.borderColor = '#E74C3C'; } return; }
   const data = { foodId: s.food.id, name: s.food.name, qty: round3(qty), unit: s.draft.unit,
-    gPerUnit: s.draft.unit === 'un' ? (parseNum(s.draft.gpu) || defaultUnitWeight(s.food.name)) : null, per100: per100Of(s.food.per100) };
+    gPerUnit: s.draft.unit === 'un' ? (parseNum(s.draft.gpu) || defaultUnitWeight(s.food.name)) : measureGrams(s.food.name, s.draft.unit), per100: per100Of(s.food.per100) };
   if(s.ingId){ const i = r.ingredients.find(x => x.id === s.ingId); if(i) Object.assign(i, data); }
   else r.ingredients.push({ id: uid('g'), ...data });
   touch(r); closeSheet(); renderRecipeStats(); renderRecipeIngs();
@@ -1299,7 +1311,7 @@ function saveMealFood(){
   if(!(qty > 0)){ const f = document.getElementById('d-iqty'); if(f){ f.focus(); f.style.borderColor = '#E74C3C'; } return; }
   const pl = ensurePlan(tg.date), arr = pl.meals[tg.meal];
   const data = { type: 'food', foodId: s.food.id, name: s.food.name, qty: round3(qty), unit: s.draft.unit,
-    gPerUnit: s.draft.unit === 'un' ? (parseNum(s.draft.gpu) || defaultUnitWeight(s.food.name)) : null, per100: per100Of(s.food.per100) };
+    gPerUnit: s.draft.unit === 'un' ? (parseNum(s.draft.gpu) || defaultUnitWeight(s.food.name)) : measureGrams(s.food.name, s.draft.unit), per100: per100Of(s.food.per100) };
   if(s.ingId){ const e = arr.find(x => x.id === s.ingId); if(e) Object.assign(e, data); }
   else arr.push({ id: uid('e'), ...data });
   touch(pl); closeSheet(); refreshDay();
@@ -1414,6 +1426,235 @@ function saveProfile(){
   Object.assign(cur, pf, { id: 'me', deleted: false });
   if(!myProfile()) state.profile = [cur];
   touch(cur); closeSheet(); render();
+}
+
+/* =========================================================
+   IMPORTAR RECEITA (foto, print ou texto colado) — grátis
+   ========================================================= */
+/* peso de 1 xícara (g); colher de sopa = 1/16, colher de chá = 1/48 */
+const CUP_GRAMS = [
+  ['farinha de trigo',120],['farinha',120],['trigo',120],['fuba',120],['amido',150],['maisena',150],['maizena',150],['polvilho',150],['goma',150],
+  ['acucar mascavo',150],['acucar',180],['arroz',185],['aveia',80],['cacau',90],['chocolate em po',90],['achocolatado',90],['leite em po',100],
+  ['coco ralado',80],['queijo ralado',100],['parmesao',100],['feijao',170],['lentilha',190],['grao de bico',200],['manteiga',200],['margarina',200],
+  ['mel',340],['oleo',220],['azeite',220],['granola',110],['castanha',140],['amendoim',145],['uva passa',150],['fermento',190],['sal',270],
+];
+function measureGrams(name, unit){
+  if(unit === 'un') return defaultUnitWeight(name);
+  if(!['xic','cs','cc'].includes(unit)) return null;
+  const words = norm(name).replace(/[,()/]/g, ' ').split(/\s+/);
+  let cup = 240;
+  for(const [k, g] of CUP_GRAMS){ if(k.split(' ').filter(x => x !== 'de' && x !== 'em').every(w => words.some(x => x.startsWith(w)))){ cup = g; break; } }
+  return round2(unit === 'xic' ? cup : unit === 'cs' ? cup / 16 : cup / 48);
+}
+
+const NUM_WORDS = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, meio: 0.5, meia: 0.5 };
+const FRAC = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1/3, '⅔': 2/3, '⅛': 0.125 };
+const UNIT_PATTERNS = [ // [regex sem acento, unidade, gramas por unidade (opcional)]
+  [/^(kg|quilos?|kilos?)\b/, 'kg'], [/^(g|gr|grs|gramas?)\b/, 'g'], [/^(ml|mililitros?)\b/, 'ml'], [/^(l|lt|litros?)\b/, 'L'],
+  [/^(xicaras?|xic\.?|xc\.?)( \(?cha\)?)?\b/, 'xic'], [/^(copos?( americanos?)?)\b/, 'xic', 200],
+  [/^(colher(es)?|c\.?)( de)? (sopa|s\.?)\b/, 'cs'], [/^(cs|csp)\b/, 'cs'],
+  [/^(colher(es)?|c\.?)( de)? (cha|c\.?|cafe)\b/, 'cc'], [/^(cc|cch)\b/, 'cc'], [/^colher(es)?\b/, 'cs'],
+  [/^(latas?)\b/, 'un', 395], [/^(caixinhas?|caixas?)\b/, 'un', 200], [/^(pacotes?)\b/, 'un', 500], [/^(sache|saches|envelopes?)\b/, 'un', 10],
+  [/^(fatias?)\b/, 'un', 20], [/^(dentes?)\b/, 'un', 5], [/^(pitadas?)\b/, 'g', null, 1], [/^(unidades?|un|und|unid)\b/, 'un'],
+  [/^(ramos?|maços?|macos?)\b/, 'un', 30], [/^(filés?|files?)\b/, 'un', 120], [/^(postas?)\b/, 'un', 150], [/^(potes?)\b/, 'un', 170],
+];
+const ING_STOP = new Set(['de','da','do','das','dos','com','sem','em','a','o','e','picado','picada','picados','picadas','ralado','ralada','ralados','fatiado','fatiada',
+  'cubos','cubinhos','pedacos','bem','maduro','madura','maduras','maduros','medio','media','medios','medias','grande','grandes','pequeno','pequena','pequenos','pequenas',
+  'fresco','fresca','gosto','opcional','aproximadamente','aprox','cozido','cozida','cozidos','cozidas','cru','crua','temperado','temperada','moido','moida','morno','morna',
+  'quente','frio','fria','gelado','gelada','derretido','derretida','peneirado','peneirada','lavado','lavada','sem pele','tipo','para','pra','untar','polvilhar','servir','decorar']);
+const ING_ALIAS = { maizena: 'amido milho', maisena: 'amido milho', oleo: 'oleo soja', 'leite': 'leite vaca integral', acucar: 'acucar refinado', frango: 'frango peito cru',
+  'peito de frango': 'frango peito cru', 'carne moida': 'carne bovina patinho cru', ovo: 'ovo galinha inteiro cru', ovos: 'ovo galinha inteiro cru', 'creme de leite': 'creme leite',
+  'leite condensado': 'leite condensado', 'queijo mussarela': 'queijo mozarela', mussarela: 'queijo mozarela', mucarela: 'queijo mozarela', 'farinha de trigo': 'farinha trigo',
+  tomate: 'tomate com semente', cebola: 'cebola crua', alho: 'alho cru', batata: 'batata inglesa crua', cenoura: 'cenoura crua', manteiga: 'manteiga com sal',
+  'fermento em po': 'fermento po', fermento: 'fermento po', 'aveia': 'aveia flocos', banana: 'banana prata', 'arroz': 'arroz tipo 1 cru', feijao: 'feijao carioca cru',
+  'oleo de coco': 'oleo coco', sal: 'sal refinado', 'sal e pimenta': 'sal refinado', agua: 'agua', canela: 'canela po', mel: 'mel abelha', 'peito de frango em cubos': 'frango peito sem pele cru' };
+
+function parseQtyPrefix(t){
+  let s = t.trim(), qty = null, m;
+  s = s.replace(/^(\d+)\s*([½¼¾⅓⅔⅛])/, (_, a, b) => String(Number(a) + FRAC[b]));
+  if((m = s.match(/^(\d+)\s+(\d+)\/(\d+)\b/))){ qty = Number(m[1]) + Number(m[2]) / Number(m[3]); s = s.slice(m[0].length); }
+  else if((m = s.match(/^(\d+)\/(\d+)\b/))){ qty = Number(m[1]) / Number(m[2]); s = s.slice(m[0].length); }
+  else if((m = s.match(/^(\d+(?:[.,]\d+)?)/))){ qty = parseNum(m[1]); s = s.slice(m[0].length); }
+  else if(FRAC[s[0]]){ qty = FRAC[s[0]]; s = s.slice(1); }
+  else if((m = norm(s).match(/^(um|uma|dois|duas|tres|quatro|cinco|seis|meio|meia)\b/))){ qty = NUM_WORDS[m[1]]; s = s.slice(m[0].length); }
+  s = s.replace(/^\s*(e\s+)?(meia|meio)\b/i, () => { qty = (qty || 0) + 0.5; return ''; });
+  return { qty, rest: s.trim() };
+}
+function parseIngLine(line){
+  line = line.replace(/\(\s*(ch[aá]|sopa|caf[eé]|sobremesa)\s*\)/ig, '$1');
+  let { qty, rest } = parseQtyPrefix(line);
+  let unit = null, gPerUnit = null, n = norm(rest);
+  for(const [re, u, gpu, fixedQty] of UNIT_PATTERNS){
+    const m = n.match(re);
+    if(m){ unit = u; gPerUnit = gpu || null; rest = rest.slice(m[0].length); if(fixedQty) qty = (qty || 1) * fixedQty; break; }
+  }
+  rest = rest.replace(/^\s*(\(.*?\)\s*)?(de|da|do)\s+/i, '').replace(/\s+/g, ' ').trim();
+  const aGosto = /a gosto|q\.?b\.?|quanto baste/i.test(rest);
+  let name = rest.replace(/\(.*?\)/g, '').replace(/\b(a gosto|q\.?b\.?|quanto baste)\b/ig, '').split(/\s+(?:para|pra)\s+/i)[0].replace(/[,;.\-–]+\s*$/, '').trim();
+  if(!unit) unit = qty === null ? 'g' : 'un';
+  if(qty === null) qty = aGosto ? 0 : (unit === 'un' ? 1 : 0);
+  if(unit === 'un' && gPerUnit === 395 && /creme de leite/i.test(norm(name))) gPerUnit = 300;
+  if(unit === 'un' && !gPerUnit) gPerUnit = defaultUnitWeight(name);
+  if(['xic','cs','cc'].includes(unit) && !gPerUnit) gPerUnit = measureGrams(name, unit);
+  return { name: cap(name), qty: round3(qty), unit, gPerUnit };
+}
+
+/* acha o alimento da tabela que mais combina com o nome do ingrediente */
+function learnedFoods(){
+  const m = new Map();
+  liveRecipes().forEach(r => r.ingredients.forEach(i => { if(i.foodId && i.srcName) m.set(norm(i.srcName), i.foodId); }));
+  return m;
+}
+function matchFood(name, learned){
+  const key = norm(name);
+  if(learned && learned.has(key)){ const f = findFood(learned.get(key)); if(f) return f; }
+  const mineExact = liveFoods().find(f => norm(f.name) === key); if(mineExact) return mineExact;
+  const keyCore = key.split(/\s+/).filter(w => !ING_STOP.has(w)).join(' ');
+  const aliasKey = Object.keys(ING_ALIAS).find(a => key === a || keyCore === a);
+  let words = (aliasKey ? ING_ALIAS[aliasKey] : key).replace(/[,()/]/g, ' ').split(/\s+/).filter(w => w && !ING_STOP.has(w) && !/^\d/.test(w));
+  if(!words.length || !TACO) return null;
+  const sing = w => w.length > 4 && w.endsWith('s') ? w.slice(0, -1) : w;
+  const pool = [...liveFoods().map(f => ({ ...f, n: norm(f.name), mine: true })), ...TACO];
+  let best = null, bestScore = 0;
+  for(const f of pool){
+    const fw = f.n.replace(/[,()/]/g, ' ').split(/\s+/).filter(Boolean);
+    const has = w => fw.some(x => sing(x) === sing(w) || (sing(w).length >= 4 && x.startsWith(sing(w))));
+    if(!has(words[0])) continue;
+    let score = 10;
+    words.slice(1).forEach(w => { if(has(w)) score += 3; });
+    score -= fw.length * 0.25;
+    if(/\bcru|crua\b/.test(f.n)) score += 1.5;
+    if(/sem pele/.test(f.n)) score += 0.5;
+    if(/\b(cozid|frit|assad|grelhad|refogad|ensopad|doce|pudim|mingau|bolo|torta)/.test(f.n) && !words.some(w => /cozid|frit|assad|grelhad|refogad/.test(w))) score -= 2.5;
+    score += Math.max(0, 3 - popRank(f.n) * 0.2);
+    if(f.mine) score += 2;
+    if(score > bestScore){ bestScore = score; best = f; }
+  }
+  return best;
+}
+
+/* separa título, rendimento, ingredientes e modo de preparo */
+const HDR_ING = /^\s*(ingredientes?|lista de ingredientes|vai precisar|voce vai precisar)\b\s*:?/;
+const HDR_PREP = /^\s*(modo de (preparo|fazer)|preparo|como fazer|instrucoes|passo a passo|montagem|cobertura|calda|recheio|massa)\b\s*:?/;
+function looksLikeIngredient(line){
+  const n = norm(line);
+  if(/^\d+\s*[.)º°-]\s+[a-z]/.test(n) && n.split(' ').length > 7) return false; // passo numerado
+  return /^([\d½¼¾⅓⅔⅛]|(um|uma|dois|duas|tres|meia|meio)\s)/.test(n) || /\b(xicaras?|colher(es)?|gramas?|kg|ml|litros?|latas?|a gosto|pitada|dentes?|caixinha)\b/.test(n);
+}
+function parseRecipeText(text){
+  const raw = String(text || '').split(/\r?\n/).map(l => l.replace(/^\s*(?:[-–—•*·>+»«°]|\[\s*[xX]?\s*\]|[☐☑✓✔□■●○]|[eoa©®](?=\s+[\d½¼¾]))\s*/i, '').trim());
+  const lines = raw.filter(Boolean);
+  let title = '', portions = null, mode = 'auto';
+  const ings = [], prep = [];
+  lines.forEach((l, idx) => {
+    const n = norm(l);
+    const pm = n.match(/\b(rende|serve|rendimento|porcoes|porcao|pedacos|fatias)\b\D{0,20}(\d+)/) || n.match(/(\d+)\s*(porcoes|pessoas|pedacos|fatias|unidades)\b/);
+    if(pm && n.length < 60){ portions = Number(pm[2] && /\d/.test(pm[2]) ? pm[2] : pm[1]); return; }
+    if(HDR_ING.test(n)){ mode = 'ing'; const rest = l.replace(/^[^:]*:\s*/, ''); if(rest && rest !== l && looksLikeIngredient(rest)) ings.push(rest); return; }
+    if(HDR_PREP.test(n) && n.length < 40){ mode = 'prep'; return; }
+    if(!title && idx === 0 && !looksLikeIngredient(l) && l.length < 70){ title = l.replace(/[:.]$/, ''); return; }
+    if(mode === 'ing') { if(looksLikeIngredient(l) || l.split(' ').length <= 6) ings.push(l); else { mode = 'prep'; prep.push(l); } }
+    else if(mode === 'prep') prep.push(l);
+    else (looksLikeIngredient(l) ? ings : prep).push(l);
+  });
+  return { title: cap(title), portions, ings: ings.map(parseIngLine).filter(i => i.name && (i.name.match(/[a-zà-ÿ]/gi) || []).length >= 2), prep: prep.join('\n') };
+}
+
+/* --- telas --- */
+function openRecipeImport(){
+  state.sheet = { type: 'recimport', draft: { text: '' } };
+  openSheetHtml(`
+    <p class="overlay-title">📥 Importar receita</p>
+    <p class="overlay-sub">Eu separo o nome, os ingredientes com as quantidades e o modo de preparo — e já calculo as calorias.</p>
+    <button class="modal-btn" data-act="ri-photo"><b>📸 Foto ou print</b><span>Receita impressa, de site, de livro ou de app</span></button>
+    <div class="ocr-box">
+      <span class="form-label">✍️ Receita escrita à mão</span>
+      <p><b>iPhone:</b> abra a foto → toque no ícone de texto ▢ → <b>Selecionar Tudo</b> → <b>Copiar</b>.</p>
+      <p style="margin-top:6px"><b>Android:</b> abra a foto → <b>Lens</b> → <b>Texto</b> → <b>Selecionar tudo</b> → <b>Copiar</b>.</p>
+      <p style="margin-top:6px">Depois cole aqui embaixo 👇 (o leitor do celular entende letra de mão bem melhor)</p>
+    </div>
+    <button class="ghost-btn" data-act="ri-paste" style="background:#EEF3FB;color:var(--navy)">📋 Colar o que copiei</button>
+    <textarea class="text-input" id="d-rtext" data-draft="text" rows="8" style="margin-top:10px;resize:vertical" placeholder="Bolo de banana&#10;Rende 8 fatias&#10;&#10;Ingredientes&#10;3 bananas maduras&#10;2 ovos&#10;1 xícara de aveia&#10;&#10;Modo de preparo&#10;Bata tudo e asse por 30 min."></textarea>
+    <p class="photo-status" id="ri-status"></p>
+    <div class="sheet-actions">
+      <button class="cta" data-act="ri-read">Ler receita</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+async function recipePhotoToText(file){
+  const st = document.getElementById('ri-status');
+  const say = t => { const el = document.getElementById('ri-status'); if(el) el.textContent = t; };
+  say('🔎 Lendo a foto… (leva uns segundos)');
+  try{
+    await loadTesseract();
+    const src = await loadBitmap(file);
+    let best = '';
+    for(const blur of [false, true]){
+      const res = await Tesseract.recognize(await prepImage(src, blur), 'por');
+      const words = ((res && res.data && res.data.words) || []).filter(w => w.confidence >= 55 && /[a-zà-ÿ]{3,}/i.test(w.text)).length;
+      const txt = (res && res.data && res.data.text) || '';
+      if(words >= 8){ best = txt; break; }
+      if(txt.length > best.length) best = txt;
+    }
+    best = best.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(l => (l.match(/[a-zà-ÿ0-9½¼¾]/gi) || []).length >= 2).join('\n');
+    const ta = document.getElementById('d-rtext');
+    if(ta && state.sheet && state.sheet.type === 'recimport'){ ta.value = best; state.sheet.draft.text = best; }
+    say(best ? '✅ Li a foto. Confira o texto, corrija se precisar e toque em "Ler receita".' : 'Não consegui ler essa foto. Se for letra de mão, use o passo ✍️ acima.');
+  }catch(e){ console.warn(e); say('Não consegui ler a foto agora (precisa de internet na 1ª vez).'); }
+}
+async function readRecipeText(){
+  const text = state.sheet.draft.text;
+  if(!text.trim()){ toast('Cole o texto ou tire uma foto primeiro.'); return; }
+  try{ await ensureTaco(); }catch(e){}
+  const p = parseRecipeText(text);
+  if(!p.ings.length){ toast('Não achei ingredientes. Confira se tem as quantidades (ex: "2 ovos").', null, null, 4000); return; }
+  const learned = learnedFoods();
+  const ings = p.ings.map(i => { const f = matchFood(i.name, learned); return { ...i, food: f ? { id: f.id, name: f.name, per100: per100Of(f.per100) } : (i.qty === 0 ? { id: 'free', name: i.name, per100: per100Of(null) } : null) }; });
+  state.sheet = { type: 'recreview', draft: { title: p.title, portions: numToInput(p.portions || 1), prep: p.prep }, ings, off: new Set(), text };
+  renderRecipeReview();
+}
+function renderRecipeReview(){
+  const s = state.sheet, d = s.draft;
+  const tot = s.ings.reduce((acc, i, idx) => acc + (s.off.has(idx) || !i.food ? 0 : ingNutri({ ...i, per100: i.food.per100 }).kcal), 0);
+  const missing = s.ings.filter((i, idx) => !i.food && !s.off.has(idx)).length;
+  openSheetHtml(`
+    <p class="overlay-title">Confira a receita</p>
+    <label class="form-label" for="d-rvname">Nome</label>
+    <input class="text-input" id="d-rvname" data-draft="title" value="${esc(d.title)}" placeholder="Nome da receita" />
+    <label class="form-label" for="d-rvpor">Rende quantas porções?</label>
+    <input class="text-input" id="d-rvpor" data-draft="portions" inputmode="decimal" value="${esc(d.portions)}" />
+    <span class="form-label">Ingredientes (${s.ings.length}) — toque pra tirar algum</span>
+    ${s.ings.map((i, idx) => {
+      const on = !s.off.has(idx);
+      const kc = i.food ? ingNutri({ ...i, per100: i.food.per100 }).kcal : null;
+      return `<div class="item-row" style="border-top:${idx ? '1px solid #F0F1F6' : 'none'}">
+        <button class="chk ${on ? 'on' : ''}" data-act="rv-toggle" data-idx="${idx}">${on ? '✓' : ''}</button>
+        <div class="item-main"><div class="item-name">${esc(i.qty ? ingQtyTxt(i) + ' · ' : '')}${esc(i.name)}</div>
+          <div class="item-detail">${i.food ? '→ ' + esc(i.food.name) : '⚠️ não achei na tabela — você escolhe depois'}</div></div>
+        <div class="item-sub">${kc === null ? '—' : kcalTxt(kc)}</div>
+      </div>`;
+    }).join('')}
+    <div class="ing-preview" style="margin-top:12px"><b>${kcalTxt(tot)} na receita</b><span>${kcalTxt(tot / (parseNum(d.portions) || 1))} por porção${missing ? ` · ${missing} sem calorias ainda` : ''}</span></div>
+    ${d.prep ? `<span class="form-label">Modo de preparo</span><p class="prep-preview">${esc(d.prep).replace(/\n/g, '<br/>')}</p>` : ''}
+    <div class="sheet-actions">
+      <button class="cta" data-act="rv-save">Salvar receita</button>
+      <button class="ghost-btn" data-act="rv-back">← Voltar e editar o texto</button>
+    </div>`);
+}
+function saveImportedRecipe(){
+  const s = state.sheet, d = s.draft;
+  const name = (d.title || '').trim() || 'Receita importada';
+  const portions = parseNum(d.portions) > 0 ? round2(parseNum(d.portions)) : 1;
+  const ings = s.ings.filter((_, idx) => !s.off.has(idx)).map(i => ({
+    id: uid('g'), foodId: i.food ? i.food.id : '', name: i.food ? i.food.name : i.name, srcName: i.name,
+    qty: i.qty, unit: i.unit, gPerUnit: i.gPerUnit, per100: i.food ? i.food.per100 : per100Of(null),
+  }));
+  const r = { id: uid('r'), name: cap(name), portions, notes: d.prep || '', updatedAt: 0, deleted: false, ingredients: ings };
+  state.recipes.push(r); touch(r);
+  closeSheet();
+  state.recipeId = r.id; state.screen = 'recipe'; render(); window.scrollTo(0, 0);
+  const miss = ings.filter(i => !i.foodId).length;
+  toast(miss ? `Receita salva ✅ ${miss} ${miss > 1 ? 'ingredientes precisam' : 'ingrediente precisa'} que você escolha o alimento (⚠️)` : 'Receita salva ✅', null, null, 5000);
 }
 
 /* =========================================================
@@ -2468,6 +2709,26 @@ document.addEventListener('click', e => {
     case 'repeat-month': repeatWeekToMonthEnd(); break;
     case 'week-to-list': openToListSheet({ kind: 'week', start: weekStartOf(state.menuDate) }); break;
     case 'new-recipe': newRecipe(); break;
+    case 'import-recipe': openRecipeImport(); break;
+    case 'ri-photo': document.getElementById('recipe-photo-input').click(); break;
+    case 'ri-paste': {
+      const ta = document.getElementById('d-rtext');
+      const fail = () => { ta.focus(); toast('Toque e segure na caixa de texto e escolha "Colar".', null, null, 3500); };
+      if(navigator.clipboard && navigator.clipboard.readText){
+        navigator.clipboard.readText().then(t => {
+          if(!t){ toast('Nada copiado ainda — copie o texto da foto primeiro.', null, null, 3500); return; }
+          state.sheet.draft.text = (ta.value ? ta.value + '\n' : '') + t; ta.value = state.sheet.draft.text;
+        }).catch(fail);
+      } else fail();
+      break;
+    }
+    case 'ri-read': readRecipeText(); break;
+    case 'rv-toggle': {
+      const i = Number(el.dataset.idx), off = state.sheet.off; off.has(i) ? off.delete(i) : off.add(i);
+      const box = document.getElementById('sheet-box'), top = box.scrollTop; renderRecipeReview(); box.scrollTop = top; break;
+    }
+    case 'rv-save': saveImportedRecipe(); break;
+    case 'rv-back': { const t = state.sheet.text; openRecipeImport(); state.sheet.draft.text = t; document.getElementById('d-rtext').value = t; break; }
     case 'open-recipe': state.recipeId = id; state.screen = 'recipe'; render(); window.scrollTo(0,0); ensureTaco(); break;
     case 'recipes-back': {
       const r = activeRecipe();
@@ -2645,6 +2906,11 @@ document.addEventListener('keydown', e => {
     else if(state.sheet.type === 'mealrec') saveMealRecipe();
     else if(state.sheet.type === 'profile') saveProfile();
   }
+});
+document.getElementById('recipe-photo-input').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if(file && state.sheet && state.sheet.type === 'recimport') recipePhotoToText(file);
 });
 ['photo-input','gallery-input'].forEach(id => document.getElementById(id).addEventListener('change', e => {
   const file = e.target.files && e.target.files[0];
