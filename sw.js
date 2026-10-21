@@ -2,7 +2,7 @@
    - Página: tenta a internet primeiro (pra pegar atualizações) e usa a cópia guardada se estiver offline.
    - Ícones e bibliotecas: usa a cópia guardada e atualiza em segundo plano.
    - Dados (Supabase): nunca passam pelo cache. */
-const CACHE = 'lista-compras-v9';
+const CACHE = 'lista-compras-v10';
 const SHELL = ['./', './index.html', './manifest.json', './taco.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', event => {

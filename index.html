@@ -299,6 +299,18 @@
   .swipe-card{position:relative;touch-action:pan-y;transition:transform .2s ease;will-change:transform;user-select:none;-webkit-user-select:none;}
   .swipe-hint{font-size:12px;color:var(--gray);font-weight:600;margin:0 0 8px;text-align:center;}
 
+  /* novo alimento */
+  .seg.light{background:var(--bg);margin-top:0;}
+  .seg.light button{color:var(--gray);}
+  .seg.light button.on{background:var(--navy);color:#fff;}
+  .lbl-demo{margin-top:10px;border:2px solid #222;border-radius:8px;padding:8px 10px;background:#fff;font-size:12px;color:#222;}
+  .lbl-h{font-weight:800;text-align:center;border-bottom:3px solid #222;padding-bottom:4px;margin-bottom:4px;font-size:12px;letter-spacing:.02em;}
+  .lbl-row{display:grid;grid-template-columns:1fr 54px 54px;border-bottom:1px solid #ccc;padding:3px 0;}
+  .lbl-row span:not(:first-child){text-align:center;font-weight:700;}
+  .lbl-row .hl{background:#FFE58A;border-radius:4px;}
+  .lbl-head{font-weight:800;}
+  .lbl-demo p{margin:6px 0 0;font-size:12px;color:var(--navy);font-weight:600;}
+
   /* toast */
   .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 86px);transform:translate(-50%,20px);opacity:0;pointer-events:none;background:var(--ink);color:#fff;border-radius:14px;padding:12px 14px;font-size:14px;font-weight:600;display:flex;gap:14px;align-items:center;max-width:calc(100% - 32px);width:max-content;z-index:60;transition:all .2s;box-shadow:0 8px 24px rgba(0,0,0,.25);}
   .toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
@@ -338,6 +350,7 @@
 <input type="file" id="gallery-input" accept="image/*" hidden />
 <input type="file" id="recipe-photo-input" accept="image/*" hidden />
 <input type="file" id="receipt-photo-input" accept="image/*" hidden />
+<input type="file" id="label-photo-input" accept="image/*" hidden />
 
 <script>
 'use strict';
@@ -899,26 +912,91 @@ function openFoodSheet(name, foodId, ret){
   const mine = !!(f && foodId.startsWith('c'));
   const p = f ? per100Of(f.per100) : null;
   const v = x => p ? numToInput(round2(x)) : '';
-  state.sheet = { type: 'food', editId: mine ? foodId : null, ret: ret || null,
-    draft: { name: f ? (mine ? f.name : cap(f.name) + ' (meu)') : cap(name || ''), base: '100', kcal: v(p && p.kcal), p: v(p && p.p), c: v(p && p.c), f: v(p && p.f), fib: v(p && p.fib) } };
-  const d = state.sheet.draft;
+  const target = (ret && ret.target) || state.ingTarget || null;
+  const adding = !f && !!target && (!ret || ret.kind === 'new');
+  const hasMore = !!(p && (p.p || p.c || p.f || p.fib));
+  state.sheet = { type: 'food', editId: mine ? foodId : null, ret: ret || null, adding, target,
+    draft: { name: f ? (mine ? f.name : cap(f.name) + ' (meu)') : cap(name || ''), mode: '100', porG: '', kcal: v(p && p.kcal), p: v(p && p.p), c: v(p && p.c), f: v(p && p.f), fib: v(p && p.fib), use: '', more: hasMore } };
+  renderFoodSheet(f ? null : (cap(name || '') ? '#d-fkcal' : '#d-fname'));
+}
+function renderFoodSheet(focusSel){
+  const s = state.sheet, d = s.draft, mine = !!s.editId;
+  const isNew = !s.editId && !(s.ret && s.ret.kind === 'picked') && !d.name.endsWith('(meu)');
+  const uses = mine ? countFoodUses(s.editId) : 0;
   const fld = (k, lbl) => `<div><label class="form-label" for="d-f${k}">${lbl}</label><input class="text-input" id="d-f${k}" data-draft="${k}" inputmode="decimal" placeholder="0" value="${esc(d[k])}" /></div>`;
-  const uses = mine ? countFoodUses(foodId) : 0;
+  const tgt = s.target && s.target.kind === 'meal' ? 'refeição' : 'receita';
+  const colLbl = d.mode === '100' ? '100 g' : 'porção';
   openSheetHtml(`
-    <p class="overlay-title">${mine ? '✏️ Editar alimento' : (f ? '✏️ Ajustar alimento' : 'Novo alimento')}</p>
-    <p class="overlay-sub">${mine ? `Mude o que precisar. ${uses ? `Atualizo também ${uses} ${uses > 1 ? 'lugares' : 'lugar'} (receitas e cardápio) que usam ele.` : ''}` : (f ? 'Esse é da tabela TACO. Vou criar uma cópia sua (⭐) com os valores que você ajustar.' : 'Copie da tabela nutricional da embalagem. Fica salvo pra usar de novo (⭐).')}</p>
+    <p class="overlay-title">${mine ? '✏️ Editar alimento' : (d.name.endsWith('(meu)') ? '✏️ Ajustar alimento' : '➕ Novo alimento')}</p>
+    ${mine && uses ? `<p class="overlay-sub">Atualizo também ${uses} ${uses > 1 ? 'lugares' : 'lugar'} (receitas e cardápio) que usam ele.</p>` : ''}
+    ${d.name.endsWith('(meu)') ? `<p class="overlay-sub">Esse é da tabela TACO. Vou criar uma cópia sua (⭐) com os valores que você ajustar.</p>` : ''}
     <label class="form-label" for="d-fname">Nome</label>
-    <input class="text-input" id="d-fname" data-draft="name" value="${esc(d.name)}" placeholder="Ex: Pão integral Wickbold" />
-    <label class="form-label" for="d-fbase">Os valores abaixo são para quantos gramas (ou ml)?</label>
-    <input class="text-input" id="d-fbase" data-draft="base" inputmode="decimal" value="100" />
-    <div class="food-grid">
-      ${fld('kcal', 'Calorias (kcal)')}${fld('p', 'Proteínas (g)')}${fld('c', 'Carboidratos (g)')}${fld('f', 'Gorduras totais (g)')}${fld('fib', 'Fibra (g)')}
+    <input class="text-input" id="d-fname" data-draft="name" value="${esc(d.name)}" placeholder="Ex: Chocolate 40% Amaro" />
+
+    <button class="modal-btn" data-act="fl-photo" style="margin:12px 0 0;background:#EEF3FB"><b>📸 Ler a tabela da embalagem (foto)</b><span>Tire a foto <u>bem de perto</u>, só da tabela nutricional</span></button>
+    <p class="photo-status" id="fl-status"></p>
+
+    <span class="form-label">A embalagem mostra:</span>
+    <div class="seg light">
+      <button class="${d.mode === '100' ? 'on' : ''}" data-act="fl-mode" data-val="100">Tabela de 100 g</button>
+      <button class="${d.mode === 'por' ? 'on' : ''}" data-act="fl-mode" data-val="por">Só a porção</button>
     </div>
+    ${isNew || d.mode === 'por' ? `
+    <div class="lbl-demo">
+      <div class="lbl-h">INFORMAÇÃO NUTRICIONAL</div>
+      <div class="lbl-row lbl-head"><span></span><span class="${d.mode === '100' ? 'hl' : ''}">100 g</span><span class="${d.mode === 'por' ? 'hl' : ''}">25 g</span></div>
+      <div class="lbl-row"><span>Valor energético</span><span class="${d.mode === '100' ? 'hl' : ''}">519</span><span class="${d.mode === 'por' ? 'hl' : ''}">130</span></div>
+      <div class="lbl-row"><span>Carboidratos</span><span class="${d.mode === '100' ? 'hl' : ''}">55</span><span class="${d.mode === 'por' ? 'hl' : ''}">14</span></div>
+      <p>👆 Copie os números da coluna <b>${d.mode === '100' ? '100 g' : 'da porção'}</b> (a amarela)${d.mode === 'por' ? ' e diga quantos gramas é a porção' : ''}.</p>
+    </div>` : ''}
+    ${d.mode === 'por' ? `<label class="form-label" for="d-fporG">A porção tem quantos gramas (ou ml)?</label>
+    <input class="text-input" id="d-fporG" data-draft="porG" inputmode="decimal" placeholder="Ex: 25" value="${esc(d.porG)}" />` : ''}
+
+    <label class="form-label" for="d-fkcal">Calorias (kcal) em ${colLbl === '100 g' ? '100 g' : '1 porção'} <b style="color:var(--red)">*</b></label>
+    <input class="text-input" id="d-fkcal" data-draft="kcal" inputmode="decimal" placeholder="Ex: 519" value="${esc(d.kcal)}" />
+
+    <button class="link-btn" data-act="fl-more" style="display:block">${d.more ? '− Esconder detalhes' : '+ Proteína, carboidrato, gordura e fibra (opcional)'}</button>
+    <div class="food-grid" style="${d.more ? '' : 'display:none'}">
+      ${fld('p', 'Proteínas (g)')}${fld('c', 'Carboidratos (g)')}${fld('f', 'Gorduras totais (g)')}${fld('fib', 'Fibra (g)')}
+    </div>
+
+    ${s.adding ? `
+    <label class="form-label" for="d-fuse" style="margin-top:18px">Quanto vai usar na ${tgt}? (g)</label>
+    <input class="text-input big-price" id="d-fuse" data-draft="use" inputmode="decimal" placeholder="Ex: 30" value="${esc(d.use)}" />` : ''}
+    <div class="ing-preview" id="food-preview"></div>
+
     <div class="sheet-actions">
-      <button class="cta" data-act="food-save">${mine ? 'Salvar alterações' : 'Salvar alimento'}</button>
+      <button class="cta" data-act="food-save">${s.adding ? `Adicionar à ${tgt}` : (mine ? 'Salvar alterações' : 'Salvar alimento')}</button>
       ${mine ? `<button class="danger-btn" data-act="food-del">Excluir alimento</button>` : ''}
       <button class="ghost-btn" data-act="food-cancel">Cancelar</button>
-    </div>`, f ? null : (d.name ? '#d-fkcal' : '#d-fname'));
+    </div>`, focusSel || null);
+  updateFoodPreview();
+}
+function foodDraftPer100(d){
+  const base = d.mode === 'por' ? parseNum(d.porG) : 100;
+  const kcal = parseNum(d.kcal);
+  if(!(base > 0) || kcal === null) return null;
+  const k = 100 / base;
+  return { kcal: round2(kcal*k), p: round2((parseNum(d.p)||0)*k), c: round2((parseNum(d.c)||0)*k), f: round2((parseNum(d.f)||0)*k), fib: round2((parseNum(d.fib)||0)*k) };
+}
+function updateFoodPreview(){
+  const el = document.getElementById('food-preview'), s = state.sheet; if(!el || !s || s.type !== 'food') return;
+  const d = s.draft, p = foodDraftPer100(d);
+  if(!p){ el.style.display = 'none'; return; }
+  el.style.display = '';
+  const use = parseNum(d.use);
+  const k = use > 0 ? use / 100 : 0;
+  const per100Line = d.mode === 'por' ? `Em 100 g: ${kcalTxt(p.kcal)}` : '';
+  // conferência: calorias batem com proteína/carbo/gordura?
+  let warn = '';
+  if(p.p || p.c || p.f){
+    const calc = 4*p.p + 4*p.c + 9*p.f + 2*p.fib;
+    if(p.kcal > 30 && Math.abs(calc - p.kcal) / p.kcal > 0.25) warn = `<span style="color:var(--red)">⚠️ Os números não fecham com as calorias — confira com a embalagem.</span>`;
+    if(p.p + p.c + p.f + p.fib > 101) warn = `<span style="color:var(--red)">⚠️ A soma passa de 100 g em 100 g — algum número está errado (vírgula?).</span>`;
+  }
+  el.innerHTML = use > 0
+    ? `<b>${fmtQty(use)} g = ${kcalTxt(p.kcal * k)}</b>${p.p || p.c || p.f || p.fib ? `<span>proteína ${gTxt(p.p*k)} · carbo ${gTxt(p.c*k)} · gordura ${gTxt(p.f*k)} · fibra ${gTxt(p.fib*k)}</span>` : ''}${per100Line ? `<span>${per100Line}</span>` : ''}${warn}`
+    : `<b>${kcalTxt(p.kcal)} em 100 g</b>${s.adding ? '<span>Diga quantos gramas vai usar pra eu calcular 👆</span>' : ''}${warn}`;
 }
 function countFoodUses(id){
   let n = 0;
@@ -956,11 +1034,12 @@ function returnFromFood(ret, foodId){
 }
 function saveFoodSheet(){
   const s = state.sheet, d = s.draft;
-  const name = d.name.trim(), base = parseNum(d.base) || 100, kcal = parseNum(d.kcal);
-  if(!name){ document.getElementById('d-fname').style.borderColor = '#E74C3C'; return; }
-  if(kcal === null){ const f = document.getElementById('d-fkcal'); f.style.borderColor = '#E74C3C'; f.focus(); return; }
-  const k = 100 / base;
-  const per100 = { kcal: round2(kcal*k), p: round2((parseNum(d.p)||0)*k), c: round2((parseNum(d.c)||0)*k), f: round2((parseNum(d.f)||0)*k), fib: round2((parseNum(d.fib)||0)*k) };
+  const name = d.name.trim();
+  const bad = id => { const f = document.getElementById(id); if(f){ f.style.borderColor = '#E74C3C'; f.focus(); } };
+  if(!name) return bad('d-fname');
+  if(d.mode === 'por' && !(parseNum(d.porG) > 0)) return bad('d-fporG');
+  if(parseNum(d.kcal) === null) return bad('d-fkcal');
+  const per100 = foodDraftPer100(d);
   let food;
   if(s.editId){
     food = state.foods.find(x => x.id === s.editId);
@@ -973,9 +1052,98 @@ function saveFoodSheet(){
   closeSheet();
   if(state.screen === 'recipe'){ renderRecipeStats(); renderRecipeIngs(); }
   if(state.screen === 'day') refreshDay();
+  const use = parseNum(d.use);
+  if(s.adding && use > 0){ addFoodDirect(s.target, food, use, s.ret && s.ret.ingId); return; }
   returnFromFood(s.ret, food.id);
   toast(s.editId ? `"${food.name}" atualizado ✅` : `"${food.name}" salvo ⭐`);
 }
+/* salva o alimento e já coloca na receita / refeição com as gramas informadas */
+function addFoodDirect(target, food, grams, ingId){
+  const data = { foodId: food.id, name: food.name, qty: round3(grams), unit: 'g', gPerUnit: null, per100: per100Of(food.per100) };
+  if(target.kind === 'meal'){
+    const pl = ensurePlan(target.date), arr = pl.meals[target.meal];
+    const ex = ingId && arr.find(x => x.id === ingId);
+    if(ex) Object.assign(ex, data); else arr.push({ id: uid('e'), type: 'food', ...data });
+    touch(pl); refreshDay();
+  } else {
+    const r = activeRecipe(); if(!r) return;
+    const ex = ingId && r.ingredients.find(x => x.id === ingId);
+    if(ex) Object.assign(ex, data); else r.ingredients.push({ id: uid('g'), ...data });
+    touch(r); renderRecipeStats(); renderRecipeIngs();
+  }
+  const kc = Math.round(food.per100.kcal * grams / 100);
+  toast(`${food.name}: ${fmtQty(grams)} g = ${kc} kcal ✅`, 'Mais um', () => target.kind === 'meal' ? openMealAdd(target.meal) : openIngSheet(null, target), 5000);
+}
+
+/* --- ler a tabela nutricional por foto (grátis, no celular) --- */
+function labelNumbers(line){
+  const clean = line.replace(/\([^)]*\)/g, ' ').replace(/(\d)\s*[.,]\s*(\d)/g, '$1,$2');
+  return (clean.match(/\d+(?:,\d+)?/g) || []).map(x => parseNum(x)).filter(x => x !== null);
+}
+function parseNutritionText(text){
+  const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const n = l => norm(l);
+  const has100 = lines.some(l => /\b100\s*[g9o6]\b|\b1006\b|100\s*ml|100g/.test(n(l)));
+  const porM = n(text).match(/porcao\D{0,12}(\d+(?:[.,]\d+)?)\s*(g|9|ml|gr)\b/);
+  const porG = porM ? parseNum(porM[1]) : null;
+  const pick = re => { const l = lines.find(x => re.test(n(x)) && !/saturad|trans|acucar|adicionad/.test(n(x))); if(!l) return null; const nums = labelNumbers(l.replace(/^[^\d]*?(kcal\s*)?/i, m => m)); return nums.length ? nums[0] : null; };
+  const out = {
+    kcal: pick(/valor energ|energia|caloria/),
+    c: pick(/carbo/),
+    p: pick(/prote/),
+    f: pick(/gorduras? tota|gordura total|lipid/),
+    fib: pick(/fibra/),
+  };
+  return { ...out, mode: has100 || !porG ? '100' : 'por', porG };
+}
+async function ocrNutritionTable(src){
+  await loadTesseract();
+  // 1ª leitura: imagem inteira (bom quando a foto já é de perto)
+  const big = document.createElement('canvas');
+  const s1 = Math.min(2200 / src.width, 4200 / src.height, 3);
+  big.width = Math.round(src.width * s1); big.height = Math.round(src.height * s1);
+  { const bx = big.getContext('2d'); bx.imageSmoothingEnabled = true; bx.imageSmoothingQuality = 'high'; bx.drawImage(src, 0, 0, big.width, big.height); }
+  const r1 = await Tesseract.recognize(await prepImage(big, false, false, true), 'por');
+  let best = parseNutritionText(r1.data.text);
+  const score = x => ['kcal','c','p','f','fib'].filter(k => x[k] !== null).length;
+  // 2ª leitura: recorta a área da tabela (perto do título "INFORMAÇÃO NUTRICIONAL")
+  if(score(best) < 4){
+    const ws = (r1.data.words || []).filter(w => /nutricion|informa/i.test(norm(w.text)));
+    if(ws.length){
+      const sc = src.width / big.width; // a leitura foi feita na imagem ampliada
+      const x0 = Math.min(...ws.map(w => w.bbox.x0)), x1 = Math.max(...ws.map(w => w.bbox.x1)), y0 = Math.min(...ws.map(w => w.bbox.y0));
+      const W = (x1 - x0) * sc, cx = (x0 + x1) / 2 * sc, top = y0 * sc;
+      const cw = Math.min(src.width, W * 1.7), chh = Math.min(src.height - top, W * 1.7);
+      const crop = document.createElement('canvas');
+      const s2 = 1600 / cw;
+      crop.width = 1600; crop.height = Math.round(chh * s2);
+      { const cx2 = crop.getContext('2d'); cx2.imageSmoothingEnabled = true; cx2.imageSmoothingQuality = 'high'; cx2.drawImage(src, Math.max(0, cx - cw / 2), Math.max(0, top - W * 0.05), cw, chh, 0, 0, crop.width, crop.height); }
+      const r2 = await Tesseract.recognize(await prepImage(crop, false, false, true), 'por');
+      const p2 = parseNutritionText(r2.data.text);
+      if(score(p2) >= score(best)) best = p2;
+    }
+  }
+  return { ...best, found: score(best) };
+}
+async function foodLabelPhoto(file){
+  const say = t => { const el = document.getElementById('fl-status'); if(el) el.textContent = t; };
+  say('🔎 Lendo a tabela… (uns 10 segundos)');
+  try{
+    const src = await loadBitmap(file);
+    const r = await ocrNutritionTable(src);
+    const s = state.sheet; if(!s || s.type !== 'food') return;
+    if(!r.found){ say('Não consegui ler. Tire a foto bem de perto, só da tabela, reta e com luz.'); return; }
+    const d = s.draft;
+    d.mode = r.mode; if(r.mode === 'por') d.porG = numToInput(r.porG);
+    ['kcal','p','c','f','fib'].forEach(k => { if(r[k] !== null) d[k] = numToInput(r[k]); });
+    if(r.p !== null || r.c !== null || r.f !== null) d.more = true;
+    renderFoodSheet();
+    const miss = ['kcal','c','p','f','fib'].filter(k => r[k] === null).length;
+    const el = document.getElementById('fl-status');
+    if(el) el.textContent = `✅ Li ${r.found} de 5 valores${miss ? ' (os vazios você completa)' : ''}. Confira com a embalagem antes de salvar.`;
+  }catch(e){ console.warn(e); say('Não consegui ler a foto agora (precisa de internet na 1ª vez).'); }
+}
+
 function deleteFood(){
   const s = state.sheet, food = state.foods.find(x => x.id === s.editId); if(!food) return;
   food.deleted = true; touch(food);
@@ -2744,10 +2912,10 @@ function boxBlurGray(g, w, h, r){
     for(let y=0; y<h; y++){ out[y*w+x] = acc/k; acc += tmp[Math.min(h-1, y+r+1)*w + x] - tmp[Math.max(0, y-r)*w + x]; } }
   return out;
 }
-async function prepImage(src, blur, tall){
+async function prepImage(src, blur, tall, keep){
   const w0 = src.width, h0 = src.height, big = Math.max(w0, h0);
   // nota fiscal é comprida: escala pela largura pra letra não ficar pequena demais
-  const s = tall && h0 > w0 * 1.6 ? Math.min(1400 / w0, 4200 / h0) : (big < 1000 ? 1000/big : Math.min(1, 1700/big));
+  const s = keep ? 1 : tall && h0 > w0 * 1.6 ? Math.min(1400 / w0, 4200 / h0) : (big < 1000 ? 1000/big : Math.min(1, 1700/big));
   const w = Math.round(w0*s), h = Math.round(h0*s);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d'); ctx.drawImage(src, 0, 0, w, h);
@@ -3171,6 +3339,9 @@ document.addEventListener('click', e => {
     case 'food-del': deleteFood(); break;
     case 'food-cancel': { const sh = state.sheet; closeSheet(); if(sh.ret) returnFromFood(sh.ret.kind === 'new' ? { ...sh.ret, kind: 'search' } : sh.ret, sh.ret.foodId || null); break; }
     case 'food-save': saveFoodSheet(); break;
+    case 'fl-mode': { const sh = state.sheet; sh.draft.mode = val; const box = document.getElementById('sheet-box'), top = box.scrollTop; renderFoodSheet(val === 'por' ? '#d-fporG' : null); box.scrollTop = top; break; }
+    case 'fl-more': { const sh = state.sheet; sh.draft.more = !sh.draft.more; const box = document.getElementById('sheet-box'), top = box.scrollTop; renderFoodSheet(sh.draft.more ? '#d-fp' : null); box.scrollTop = top; break; }
+    case 'fl-photo': document.getElementById('label-photo-input').click(); break;
     case 'recipe-to-list': openToListSheet({ kind: 'recipe', id: state.recipeId }); break;
     case 'times-inc': case 'times-dec': {
       let t = parseNum(d.times) || 1; t = act === 'times-inc' ? t + 1 : Math.max(1, t - 1);
@@ -3295,6 +3466,7 @@ document.addEventListener('input', e => {
     else if(state.sheet.type === 'mealadd') renderMealResults();
     else if(state.sheet.type === 'mealrec') updateMrPreview();
     else if(state.sheet.type === 'profile') updateProfilePreview();
+    else if(state.sheet.type === 'food') updateFoodPreview();
     else updatePreview();
   }
 });
@@ -3315,6 +3487,11 @@ document.addEventListener('keydown', e => {
     else if(state.sheet.type === 'mealrec') saveMealRecipe();
     else if(state.sheet.type === 'profile') saveProfile();
   }
+});
+document.getElementById('label-photo-input').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if(file && state.sheet && state.sheet.type === 'food') foodLabelPhoto(file);
 });
 document.getElementById('receipt-photo-input').addEventListener('change', e => {
   const file = e.target.files && e.target.files[0];
