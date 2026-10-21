@@ -301,6 +301,7 @@
 <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
 <input type="file" id="gallery-input" accept="image/*" hidden />
 <input type="file" id="recipe-photo-input" accept="image/*" hidden />
+<input type="file" id="receipt-photo-input" accept="image/*" hidden />
 
 <script>
 'use strict';
@@ -1658,6 +1659,241 @@ function saveImportedRecipe(){
 }
 
 /* =========================================================
+   NOTA DO MERCADO (cupom fiscal / NFC-e) → lista já comprada
+   ========================================================= */
+const RC_SKIP = /\b(total|subtotal|sub-total|desconto|acrescimo|troco|dinheiro|cartao|credito|debito|pix|valor|pago|pagar|tributos|imposto|icms|cnpj|cpf|ie:|i\.e\.|inscricao|lei\s*\d|consumidor|protocolo|chave|serie|emissao|autorizacao|nfc-?e|danfe|documento|qtd\.?\s*total|itens|forma de pagamento|operador|caixa:|via\s|consulte|www\.|http|sefaz|fone|tel[:.]|cep|rua|av\.|avenida)\b/;
+const RC_UNIT = { un: 'un', und: 'un', unid: 'un', pc: 'un', pç: 'un', kg: 'kg', g: 'g', gr: 'g', l: 'L', lt: 'L', ml: 'ml', pct: 'pct', pt: 'pct', cx: 'cx', fd: 'cx', dz: 'dz' };
+const rcNum = s => parseNum(String(s).replace(/\s/g, ''));
+function rcUnit(u){ return RC_UNIT[norm(u || '').replace('.', '')] || 'un'; }
+function rcCleanName(s){
+  return String(s || '')
+    .replace(/^\s*\d{1,3}\s+/, '')            // nº do item
+    .replace(/^\s*\d{4,14}\s+/, '')           // código / EAN
+    .replace(/\(\s*c[óo]digo:?[^)]*\)/ig, '')
+    .replace(/\s+\d{4,14}\s*$/, '')
+    .replace(/(\d)O(ML|G|KG|L)\b/g, '$1$2').replace(/[|_*#]+/g, ' ').replace(/\s+(kg|un|und|unid)\.?\s*$/i, '').replace(/\s+/g, ' ').trim();
+}
+
+/* formato do site da Sefaz (ao abrir o QR code): "NOME (Código: 123) Qtde.:1 UN: UN Vl. Unit.: 5,49 Vl. Total 5,49" */
+function parsePortalItems(text){
+  const flat = text.replace(/[ \t]+/g, ' ');
+  const re = /\(\s*C[óo]d(?:igo)?\.?:?\s*[\w.-]*\s*\)\s*Qtde\.?\s*:?\s*([\d.,]+)\s*UN\s*:?\s*([A-Za-z.]+)\s*Vl\.?\s*Unit\.?\s*:?\s*([\d.,]+)\s*Vl\.?\s*Total\s*:?\s*([\d.,]+)/gi;
+  const out = []; let m, last = 0;
+  while((m = re.exec(flat))){
+    let name = flat.slice(last, m.index).trim();
+    const cut = name.split(/(?:Vl\.?\s*Total\s*[\d.,]+|Descri[çc][ãa]o|Valor)\s*/i); name = cut[cut.length - 1];
+    const nl = name.split(/\n/).map(x => x.trim()).filter(Boolean); name = nl.length ? nl[nl.length - 1] : name;
+    out.push({ name: rcCleanName(name.replace(/\s+/g, ' ')), qty: rcNum(m[1]), unit: rcUnit(m[2]), unitPrice: rcNum(m[3]), total: rcNum(m[4]) });
+    last = m.index + m[0].length;
+  }
+  return out;
+}
+
+/* formato do cupom impresso: "001 789... ARROZ TIO JOAO 5KG 1 UN X 24,90 24,90" (às vezes em 2 linhas) */
+const RC_QTY = /(\d+(?:[.,]\d{1,3})?)\s*(UN|UND|UNID|PC|PÇ|KG|G|GR|L|LT|ML|PCT|PT|CX|FD|DZ)?\.?\s*[xX×*]\s*(?:R\$\s*)?(\d+[.,]\s?\d{2,3})(?:\s*=)?\s*(?:[A-Z]{1,2}\d{0,2}\s+)?(?:R\$\s*)?(\d+[.,]\s?\d{2})?\s*[A-Z]?\d{0,2}\s*$/i;
+function parseCupomItems(text){
+  const raw = text.split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean), lines = [];
+  raw.forEach(l => {
+    const prev = lines[lines.length - 1];
+    const onlyPrices = /^(?:R\$\s*)?\d+[.,]\s?\d{2,3}(?:\s+(?:R\$\s*)?\d+[.,]\s?\d{2})?\s*[A-Z]?\d{0,2}$/i.test(l);
+    if(prev && (onlyPrices && /\d/.test(prev) && /[xX×*]\s*(?:R\$\s*)?(\d+[.,]\s?\d{2,3})?\s*$/.test(prev) || /\b[xX×*]$/.test(prev))) lines[lines.length - 1] = prev + ' ' + l;
+    else lines.push(l);
+  });
+  const out = []; let pending = '';
+  for(const line of lines){
+    const n = norm(line);
+    if(/^(desconto|desc\.?)\b/.test(n)){
+      const v = (line.match(/(\d+[.,]\d{2})/) || [])[1];
+      if(v && out.length) out[out.length - 1].discount = (out[out.length - 1].discount || 0) + rcNum(v);
+      continue;
+    }
+    const m = line.match(RC_QTY);
+    if(m){
+      let desc = rcCleanName(line.slice(0, m.index));
+      if((desc.match(/[A-Za-zÀ-ÿ]/g) || []).length < 3) desc = pending;
+      pending = '';
+      if((desc.match(/[A-Za-zÀ-ÿ]/g) || []).length < 3 || RC_SKIP.test(norm(desc))) continue;
+      const qty = rcNum(m[1]), unitPrice = rcNum(m[3]);
+      const total = m[4] ? rcNum(m[4]) : round2(qty * unitPrice);
+      out.push({ name: desc, qty, unit: rcUnit(m[2]), unitPrice, total });
+      continue;
+    }
+    // linha só com descrição (o preço vem na linha de baixo)
+    const letters = (line.match(/[A-Za-zÀ-ÿ]/g) || []).length;
+    if(letters >= 3 && !RC_SKIP.test(n) && /^\d{1,3}\s+\S/.test(line)) { pending = rcCleanName(line); continue; }
+    // "ARROZ 5KG ..... 24,90" (sem quantidade)
+    const s = line.match(/^(?:\d{1,3}\s+)?(?:\d{4,14}\s+)?(.*[A-Za-zÀ-ÿ].*?)\s+(?:R\$\s*)?(\d+[.,]\d{2})\s*[A-Z]?\d{0,2}$/);
+    if(s && letters >= 4 && !RC_SKIP.test(n) && pending === '' && /^\d{1,3}\s/.test(line)){
+      out.push({ name: rcCleanName(s[1]), qty: 1, unit: 'un', unitPrice: rcNum(s[2]), total: rcNum(s[2]) });
+      continue;
+    }
+    if(letters >= 3 && !RC_SKIP.test(n) && !/\d{2}\/\d{2}\/\d{2,4}/.test(line)) pending = rcCleanName(line); else pending = '';
+  }
+  return out;
+}
+
+function parseReceipt(text){
+  const t = String(text || '');
+  let items = parsePortalItems(t);
+  const portal = items.length > 0;
+  if(!portal) items = parseCupomItems(t);
+  items = items.filter(i => i.name && i.qty > 0 && (i.unitPrice > 0 || i.total > 0)).map(i => {
+    if(!(i.unitPrice > 0)) i.unitPrice = round2(i.total / i.qty);
+    if(!(i.total > 0)) i.total = round2(i.qty * i.unitPrice);
+    if(i.discount) i.total = round2(i.total - i.discount);
+    return i;
+  });
+  const flat = t.replace(/\s+/g, ' ');
+  let total = null, m;
+  const tre = /(valor\s+a\s+pagar|valor\s+total|total\s+r\$|total\s+a\s+pagar|total)\s*(?:r\$)?\s*:?\s*(\d{1,5}[.,]\d{2})/gi;
+  while((m = tre.exec(flat))){ if(/vl\.?\s*$/i.test(flat.slice(Math.max(0, m.index - 5), m.index))) continue; if(!/tributos|desconto|imposto/i.test(flat.slice(Math.max(0, m.index - 14), m.index + m[1].length))) { total = rcNum(m[2]); if(/pagar|valor total/i.test(m[1])) break; } }
+  const dm = flat.match(/(\d{2})\/(\d{2})\/(\d{4})/) || flat.match(/(\d{2})\/(\d{2})\/(\d{2})\b/);
+  let date = null;
+  if(dm){ const y = dm[3].length === 2 ? '20' + dm[3] : dm[3]; const cand = `${y}-${dm[2]}-${dm[1]}`; if(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(cand) && cand <= todayStr()) date = cand; }
+  const firstLines = t.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(0, 6);
+  const marketLine = firstLines.find(l => (l.match(/[A-Za-zÀ-ÿ]/g) || []).length >= 5 && !/cnpj|cpf|documento|danfe|nfc|consulta|auxiliar|sefaz|fazenda|secretaria|governo/i.test(norm(l)));
+  const market = marketLine ? cap(marketLine.replace(/\b(ltda|me|epp|eireli|s\.?\/?a\.?)\b\.?/ig, '').replace(/[-–,.]+\s*$/, '').trim().toLowerCase()).replace(/(^|\s)(\S)/g, (a, b, c) => b + c.toUpperCase()).slice(0, 40) : '';
+  return { items, total, date, market, portal };
+}
+
+function receiptItemToListItem(i){
+  const sp = splitBrandAndPack(i.name, knownBrandsFromHistory());
+  const nm = sp.name || cap(i.name.toLowerCase());
+  const h = buildHistory().get(norm(nm));
+  const unit = UNITS.includes(i.unit) ? i.unit : 'un';
+  const qty = round3(i.qty), unitPrice = i.discount ? round2(i.total / i.qty) : round2(i.unitPrice);
+  return { id: uid('i'), name: h ? h.name : nm, brand: sp.brand || '', pack: sp.pack || '', category: h ? h.category : guessCategory(nm),
+    qty, unit, unitPrice, bought: true, priority: h ? (h.priority || 'normal') : 'normal' };
+}
+
+/* --- QR code da nota (NFC-e) --- */
+function loadJsQR(){
+  return new Promise((res, rej) => {
+    if(window.jsQR) return res();
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+    s.onload = () => res(); s.onerror = () => rej(new Error('jsqr'));
+    document.head.appendChild(s);
+  });
+}
+async function findQrUrl(src){
+  try{
+    if('BarcodeDetector' in window){
+      const det = new BarcodeDetector({ formats: ['qr_code'] });
+      const r = await det.detect(src);
+      const v = r.map(x => x.rawValue).find(v => /^https?:\/\//i.test(v)); if(v) return v;
+    }
+  }catch(e){}
+  try{
+    await loadJsQR();
+    for(const max of [1400, 900, 2200]){
+      const s = Math.min(1, max / Math.max(src.width, src.height));
+      const c = document.createElement('canvas'); c.width = Math.round(src.width * s); c.height = Math.round(src.height * s);
+      const ctx = c.getContext('2d'); ctx.drawImage(src, 0, 0, c.width, c.height);
+      const img = ctx.getImageData(0, 0, c.width, c.height);
+      const code = window.jsQR(img.data, c.width, c.height, { inversionAttempts: 'attemptBoth' });
+      if(code && /^https?:\/\//i.test(code.data)) return code.data;
+    }
+  }catch(e){}
+  return null;
+}
+
+/* --- telas --- */
+function openReceiptSheet(){
+  state.sheet = { type: 'receipt', draft: { text: '' }, qr: null };
+  openSheetHtml(`
+    <p class="overlay-title">🧾 Lançar nota do mercado</p>
+    <p class="overlay-sub">Comprou sem lista? Eu leio a nota e crio a compra com os valores que você pagou.</p>
+    <button class="modal-btn" data-act="rc-photo"><b>📸 Foto da nota</b><span>Tire a foto da nota inteira, bem esticada e com luz</span></button>
+    <div id="rc-qr"></div>
+    <div class="ocr-box">
+      <span class="form-label">💡 Jeito mais certeiro (QR code da nota)</span>
+      <p>1. Aponte a <b>câmera do celular</b> pro QR code no fim da nota e abra o link (site da Sefaz).</p>
+      <p style="margin-top:6px">2. Lá aparece a lista exata dos produtos. <b>Selecione tudo</b> e <b>Copiar</b>.</p>
+      <p style="margin-top:6px">3. Volte aqui e toque em <b>Colar</b> 👇</p>
+    </div>
+    <button class="ghost-btn" data-act="rc-paste" style="background:#EEF3FB;color:var(--navy)">📋 Colar o que copiei</button>
+    <textarea class="text-input" id="d-rctext" data-draft="text" rows="6" style="margin-top:10px;resize:vertical" placeholder="O texto da nota aparece aqui (dá pra corrigir antes de ler)"></textarea>
+    <p class="photo-status" id="rc-status"></p>
+    <div class="sheet-actions">
+      <button class="cta" data-act="rc-read">Ler nota</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+async function receiptPhoto(file){
+  const say = t => { const el = document.getElementById('rc-status'); if(el) el.textContent = t; };
+  say('🔎 Lendo a nota… (pode levar uns 10 segundos)');
+  try{
+    const src = await loadBitmap(file);
+    const qr = await findQrUrl(src);
+    if(qr && state.sheet && state.sheet.type === 'receipt'){
+      state.sheet.qr = qr;
+      const box = document.getElementById('rc-qr');
+      if(box) box.innerHTML = `<a class="modal-btn" href="${esc(qr)}" target="_blank" rel="noopener" style="background:var(--green-bg);text-decoration:none"><b style="color:var(--green)">🔗 Achei o QR code! Abrir nota na Sefaz</b><span>Lá: selecionar tudo → copiar → voltar e colar aqui. Valores 100% certos.</span></a>`;
+    }
+    await loadTesseract();
+    let best = '', bestItems = -1;
+    for(const blur of [false, true]){
+      const res = await Tesseract.recognize(await prepImage(src, blur, true), 'por');
+      const txt = (res && res.data && res.data.text) || '';
+      const n = parseReceipt(txt).items.length;
+      if(n > bestItems){ best = txt; bestItems = n; }
+      if(n >= 3) break;
+    }
+    const ta = document.getElementById('d-rctext');
+    if(ta && state.sheet && state.sheet.type === 'receipt'){ ta.value = best; state.sheet.draft.text = best; }
+    say(bestItems > 0 ? `✅ Li a foto (${bestItems} ${bestItems > 1 ? 'produtos' : 'produto'}). Toque em "Ler nota" pra conferir.` : (qr ? 'A foto ficou difícil de ler — use o QR code acima 👆' : 'Não consegui ler bem. Tente com mais luz e a nota bem reta, ou use o QR code.'));
+  }catch(e){ console.warn(e); say('Não consegui ler a foto agora (precisa de internet na 1ª vez).'); }
+}
+function readReceiptText(){
+  const text = state.sheet.draft.text;
+  if(!text.trim()){ toast('Tire a foto ou cole o texto da nota primeiro.'); return; }
+  const r = parseReceipt(text);
+  if(!r.items.length){ toast('Não achei produtos com preço nesse texto. Tente pelo QR code da nota.', null, null, 4500); return; }
+  state.sheet = { type: 'rcreview', text, qr: state.sheet.qr, items: r.items.map(receiptItemToListItem), off: new Set(),
+    total: r.total, draft: { market: r.market, date: r.date || todayStr() } };
+  renderReceiptReview();
+}
+function renderReceiptReview(){
+  const s = state.sheet, d = s.draft;
+  const sum = s.items.reduce((a, it, i) => a + (s.off.has(i) ? 0 : it.qty * it.unitPrice), 0);
+  const diff = s.total ? round2(s.total - sum) : null;
+  openSheetHtml(`
+    <p class="overlay-title">Confira a compra</p>
+    <div class="qty-row">
+      <input class="text-input" id="d-rcm" data-draft="market" placeholder="🏪 Mercado" value="${esc(d.market)}" style="text-align:left;font-weight:600;font-size:15px" />
+      <input class="text-input" id="d-rcd" data-draft="date" type="date" value="${esc(d.date)}" style="width:150px;flex-shrink:0;font-size:14px;font-weight:600" />
+    </div>
+    <span class="form-label">${s.items.length} produtos — toque pra tirar algum (dá pra editar depois)</span>
+    ${s.items.map((it, i) => {
+      const on = !s.off.has(i);
+      return `<div class="item-row" style="border-top:${i ? '1px solid #F0F1F6' : 'none'}">
+        <button class="chk ${on ? 'on' : ''}" data-act="rcv-toggle" data-idx="${i}">${on ? '✓' : ''}</button>
+        <div class="item-main"><div class="item-name">${catById(it.category).emoji} ${esc(it.name)}</div>
+          <div class="item-detail">${[it.brand, it.pack].filter(Boolean).map(esc).join(' · ')}${it.brand || it.pack ? ' · ' : ''}${fmtQty(it.qty)} ${it.unit} × ${brl(it.unitPrice)}</div></div>
+        <div class="item-sub">${brl(it.qty * it.unitPrice)}</div>
+      </div>`;
+    }).join('')}
+    <div class="ing-preview" style="margin-top:12px"><b>Total: ${brl(sum)}</b>
+      <span>${s.total ? (Math.abs(diff) < 0.05 ? '✅ Confere com o total da nota' : `⚠️ A nota diz ${brl(s.total)} (diferença de ${brl(Math.abs(diff))}) — pode faltar algum item ou desconto`) : 'Confira com o total da sua nota'}</span></div>
+    <div class="sheet-actions">
+      <button class="cta" data-act="rcv-save">Salvar compra</button>
+      <button class="ghost-btn" data-act="rcv-back">← Voltar e corrigir o texto</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+function saveReceipt(){
+  const s = state.sheet, d = s.draft;
+  const items = s.items.filter((_, i) => !s.off.has(i));
+  if(!items.length) return;
+  const l = { id: uid('l'), date: /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : todayStr(), name: '', market: (d.market || '').trim(), meta: '', status: 'done', updatedAt: 0, deleted: false, items };
+  state.lists.push(l); touch(l);
+  closeSheet();
+  openList(l.id);
+  toast(`Compra salva ✅ ${items.length} produtos · ${brl(listCart(l))}`, null, null, 4000);
+}
+
+/* =========================================================
    ESTADO
    ========================================================= */
 const state = {
@@ -1886,7 +2122,8 @@ function renderHome(){
       <h1 class="h1">Carol</h1>
       <p class="sub">Suas compras, sempre no controle</p>
     </div>
-    <div class="section overlap"><button class="cta" data-act="new-list">+ Nova lista de compras</button></div>
+    <div class="section overlap"><button class="cta" data-act="new-list">+ Nova lista de compras</button>
+      <button class="ghost-btn" data-act="receipt" style="background:#fff;color:var(--navy);box-shadow:0 2px 10px rgba(27,26,51,.06)">🧾 Lançar nota do mercado (comprei sem lista)</button></div>
     <div class="section">
       ${live.length === 0 ? `<div class="empty" style="margin-top:6px">🛍️<br/><br/>Nenhuma lista ainda.<br/>Toque em "Nova lista" para começar.</div>` : ''}
       ${open.length ? `<h2 class="section-title">Em andamento</h2>${openCards}` : ''}
@@ -2409,9 +2646,10 @@ function boxBlurGray(g, w, h, r){
     for(let y=0; y<h; y++){ out[y*w+x] = acc/k; acc += tmp[Math.min(h-1, y+r+1)*w + x] - tmp[Math.max(0, y-r)*w + x]; } }
   return out;
 }
-async function prepImage(src, blur){
+async function prepImage(src, blur, tall){
   const w0 = src.width, h0 = src.height, big = Math.max(w0, h0);
-  const s = big < 1000 ? 1000/big : Math.min(1, 1700/big);
+  // nota fiscal é comprida: escala pela largura pra letra não ficar pequena demais
+  const s = tall && h0 > w0 * 1.6 ? Math.min(1400 / w0, 4200 / h0) : (big < 1000 ? 1000/big : Math.min(1, 1700/big));
   const w = Math.round(w0*s), h = Math.round(h0*s);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d'); ctx.drawImage(src, 0, 0, w, h);
@@ -2710,6 +2948,26 @@ document.addEventListener('click', e => {
     case 'week-to-list': openToListSheet({ kind: 'week', start: weekStartOf(state.menuDate) }); break;
     case 'new-recipe': newRecipe(); break;
     case 'import-recipe': openRecipeImport(); break;
+    case 'receipt': openReceiptSheet(); break;
+    case 'rc-photo': document.getElementById('receipt-photo-input').click(); break;
+    case 'rc-paste': {
+      const ta = document.getElementById('d-rctext');
+      const fail = () => { ta.focus(); toast('Toque e segure na caixa de texto e escolha "Colar".', null, null, 3500); };
+      if(navigator.clipboard && navigator.clipboard.readText){
+        navigator.clipboard.readText().then(t => {
+          if(!t){ toast('Nada copiado ainda.', null, null, 3000); return; }
+          state.sheet.draft.text = t; ta.value = t; readReceiptText();
+        }).catch(fail);
+      } else fail();
+      break;
+    }
+    case 'rc-read': readReceiptText(); break;
+    case 'rcv-toggle': {
+      const i = Number(el.dataset.idx), off = state.sheet.off; off.has(i) ? off.delete(i) : off.add(i);
+      const box = document.getElementById('sheet-box'), top = box.scrollTop; renderReceiptReview(); box.scrollTop = top; break;
+    }
+    case 'rcv-save': saveReceipt(); break;
+    case 'rcv-back': { const t = state.sheet.text, qr = state.sheet.qr; openReceiptSheet(); state.sheet.draft.text = t; state.sheet.qr = qr; document.getElementById('d-rctext').value = t; break; }
     case 'ri-photo': document.getElementById('recipe-photo-input').click(); break;
     case 'ri-paste': {
       const ta = document.getElementById('d-rtext');
@@ -2906,6 +3164,11 @@ document.addEventListener('keydown', e => {
     else if(state.sheet.type === 'mealrec') saveMealRecipe();
     else if(state.sheet.type === 'profile') saveProfile();
   }
+});
+document.getElementById('receipt-photo-input').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if(file && state.sheet && state.sheet.type === 'receipt') receiptPhoto(file);
 });
 document.getElementById('recipe-photo-input').addEventListener('change', e => {
   const file = e.target.files && e.target.files[0];
