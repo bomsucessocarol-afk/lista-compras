@@ -87,6 +87,9 @@
 
   /* home */
   .open-card{display:block;margin-bottom:12px;cursor:pointer;border:2px solid var(--yellow);}
+  .swipe-wrap.open-wrap{margin-bottom:12px;}
+  .swipe-wrap.open-wrap .open-card{margin-bottom:0;}
+  .oc-right{display:flex;align-items:center;gap:2px;margin-right:-8px;margin-top:-4px;}
   .oc-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px;}
   .oc-title{margin:0;font-size:16px;font-weight:800;}
   .oc-sub{margin:2px 0 0;font-size:12px;color:var(--gray);}
@@ -2185,17 +2188,18 @@ function renderHome(){
     const n = l.items.length, b = l.items.filter(i=>i.bought).length;
     const unpriced = l.items.filter(i=>i.unitPrice===null).length;
     return `
-      <div class="card open-card" data-act="open" data-id="${esc(l.id)}">
+      <div class="swipe-wrap open-wrap" data-swipe="del-list" data-id="${esc(l.id)}"><div class="swipe-bg">🗑️ Excluir</div>
+      <div class="card open-card swipe-card" data-act="open" data-id="${esc(l.id)}">
         <div class="oc-top">
           <div style="min-width:0">
             <p class="oc-title">${esc(listTitle(l))}</p>
             <p class="oc-sub">${fmtDate(l.date)}${l.market ? ' · 🏪 '+esc(l.market) : ''}</p>
           </div>
-          <span class="pill">Em andamento</span>
+          <div class="oc-right"><span class="pill">Em andamento</span><button class="hist-del" data-act="del-list" data-id="${esc(l.id)}" aria-label="Excluir lista">✕</button></div>
         </div>
         <div class="bar-track"><div class="bar-fill" style="width:${n ? b/n*100 : 0}%"></div></div>
         <div class="oc-foot"><span>${b} de ${n} ${n===1?'item':'itens'}${unpriced ? ' · '+unpriced+' sem preço' : ''}</span><b>${brl(listEstimated(l))}</b></div>
-      </div>`;
+      </div></div>`;
   }).join('');
 
   const histCards = hist.map(l => `
