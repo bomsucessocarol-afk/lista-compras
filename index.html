@@ -222,6 +222,10 @@
   .por-row{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13px;font-weight:700;color:var(--gray);}
   .por-row b{font-size:17px;color:var(--navy);min-width:20px;text-align:center;}
   .step.sm{width:36px;height:34px;font-size:20px;border-radius:10px;}
+  .res-wrap{display:flex;align-items:stretch;border-top:1px solid #F0F1F6;}
+  .res-wrap .res-row{border-top:none;flex:1;min-width:0;}
+  .res-edit{width:44px;flex-shrink:0;font-size:16px;border-left:1px solid #F0F1F6;}
+  .fp-btns{display:flex;flex-direction:column;gap:6px;align-items:flex-end;}
   .res-row{width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 4px;border-top:1px solid #F0F1F6;text-align:left;}
   .res-row span{font-size:14px;font-weight:600;color:var(--ink);}
   .res-row small{font-size:11px;color:var(--gray);text-align:right;white-space:nowrap;font-weight:700;line-height:1.2;}
@@ -813,8 +817,8 @@ function renderIngSheet(){
   openSheetHtml(`
     <p class="overlay-title">${s.ingId ? (s.target.kind === 'meal' ? 'Editar alimento' : 'Editar ingrediente') : (s.target.kind === 'meal' ? 'Quanto vai comer?' : 'Quanto vai?')}</p>
     <div class="food-pick">
-      <div style="min-width:0"><b>${esc(f.name)}</b><small>${kcalTxt(f.per100.kcal)} em 100 g</small></div>
-      <button data-act="ing-change">Trocar</button>
+      <div style="min-width:0"><b>${f.id && f.id.startsWith('c') ? '⭐ ' : ''}${esc(f.name)}</b><small>${kcalTxt(f.per100.kcal)} em 100 g</small></div>
+      <div class="fp-btns"><button data-act="food-edit-picked">${f.id && f.id.startsWith('c') ? '✏️ Editar' : '✏️ Ajustar'}</button><button data-act="ing-change">Trocar</button></div>
     </div>
     <span class="form-label">Quantidade</span>
     <div class="qty-row">
@@ -842,10 +846,10 @@ function renderIngResults(){
   const q = s.draft.q.trim();
   if(!TACO && q){ box.innerHTML = '<p class="hint">Carregando tabela de alimentos…</p>'; return; }
   const res = searchFoods(q);
-  const rows = res.map(f => `
+  const rows = res.map(f => `<div class="res-wrap">
     <button class="res-row" data-act="ing-pick" data-food="${esc(f.id)}">
       <span>${f.mine ? '⭐ ' : ''}${esc(f.name)}</span><small>${kcalTxt(f.per100.kcal)}<br/>em 100 g</small>
-    </button>`).join('');
+    </button>${f.mine ? `<button class="res-edit" data-act="food-edit" data-food="${esc(f.id)}" aria-label="Editar alimento">✏️</button>` : ''}</div>`).join('');
   box.innerHTML = (q ? '' : (res.length ? '<p class="sugg-title">Seus alimentos</p>' : '<p class="hint" style="color:var(--gray)">Digite o nome do alimento. Dica: escolha "cozido" ou "cru" conforme você pesa.</p>'))
     + rows
     + (q ? `<button class="res-row new" data-act="food-new"><span>➕ Criar "${esc(cap(q))}"</span><small>com os dados<br/>da embalagem</small></button>` : '');
@@ -887,37 +891,95 @@ function removeIng(id){
 }
 
 /* --- criar alimento próprio (dados da embalagem) --- */
-function openFoodSheet(name){
-  state.sheet = { type: 'food', draft: { name: cap(name || ''), base: '100', kcal: '', p: '', c: '', f: '', fib: '' } };
+function openFoodSheet(name, foodId, ret){
+  const f = foodId ? findFood(foodId) : null;
+  const mine = !!(f && foodId.startsWith('c'));
+  const p = f ? per100Of(f.per100) : null;
+  const v = x => p ? numToInput(round2(x)) : '';
+  state.sheet = { type: 'food', editId: mine ? foodId : null, ret: ret || null,
+    draft: { name: f ? (mine ? f.name : cap(f.name) + ' (meu)') : cap(name || ''), base: '100', kcal: v(p && p.kcal), p: v(p && p.p), c: v(p && p.c), f: v(p && p.f), fib: v(p && p.fib) } };
   const d = state.sheet.draft;
-  const fld = (k, lbl) => `<div><label class="form-label" for="d-f${k}">${lbl}</label><input class="text-input" id="d-f${k}" data-draft="${k}" inputmode="decimal" placeholder="0" /></div>`;
+  const fld = (k, lbl) => `<div><label class="form-label" for="d-f${k}">${lbl}</label><input class="text-input" id="d-f${k}" data-draft="${k}" inputmode="decimal" placeholder="0" value="${esc(d[k])}" /></div>`;
+  const uses = mine ? countFoodUses(foodId) : 0;
   openSheetHtml(`
-    <p class="overlay-title">Novo alimento</p>
-    <p class="overlay-sub">Copie da tabela nutricional da embalagem. Fica salvo pra usar de novo (⭐).</p>
+    <p class="overlay-title">${mine ? '✏️ Editar alimento' : (f ? '✏️ Ajustar alimento' : 'Novo alimento')}</p>
+    <p class="overlay-sub">${mine ? `Mude o que precisar. ${uses ? `Atualizo também ${uses} ${uses > 1 ? 'lugares' : 'lugar'} (receitas e cardápio) que usam ele.` : ''}` : (f ? 'Esse é da tabela TACO. Vou criar uma cópia sua (⭐) com os valores que você ajustar.' : 'Copie da tabela nutricional da embalagem. Fica salvo pra usar de novo (⭐).')}</p>
     <label class="form-label" for="d-fname">Nome</label>
     <input class="text-input" id="d-fname" data-draft="name" value="${esc(d.name)}" placeholder="Ex: Pão integral Wickbold" />
-    <label class="form-label" for="d-fbase">A tabela da embalagem é para quantos gramas (ou ml)?</label>
+    <label class="form-label" for="d-fbase">Os valores abaixo são para quantos gramas (ou ml)?</label>
     <input class="text-input" id="d-fbase" data-draft="base" inputmode="decimal" value="100" />
     <div class="food-grid">
       ${fld('kcal', 'Calorias (kcal)')}${fld('p', 'Proteínas (g)')}${fld('c', 'Carboidratos (g)')}${fld('f', 'Gorduras totais (g)')}${fld('fib', 'Fibra (g)')}
     </div>
     <div class="sheet-actions">
-      <button class="cta" data-act="food-save">Salvar alimento</button>
-      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
-    </div>`, d.name ? '#d-fkcal' : '#d-fname');
+      <button class="cta" data-act="food-save">${mine ? 'Salvar alterações' : 'Salvar alimento'}</button>
+      ${mine ? `<button class="danger-btn" data-act="food-del">Excluir alimento</button>` : ''}
+      <button class="ghost-btn" data-act="food-cancel">Cancelar</button>
+    </div>`, f ? null : (d.name ? '#d-fkcal' : '#d-fname'));
+}
+function countFoodUses(id){
+  let n = 0;
+  state.recipes.forEach(r => { if(!r.deleted && r.ingredients.some(i => i.foodId === id)) n++; });
+  state.plans.forEach(pl => { if(!pl.deleted && MEALS.some(m => (pl.meals[m.id] || []).some(e => e.foodId === id))) n++; });
+  return n;
+}
+function propagateFood(food){
+  state.recipes.forEach(r => {
+    let ch = false;
+    r.ingredients.forEach(i => { if(i.foodId === food.id){ i.name = food.name; i.per100 = per100Of(food.per100); ch = true; } });
+    if(ch) touch(r);
+  });
+  state.plans.forEach(pl => {
+    let ch = false;
+    MEALS.forEach(m => (pl.meals[m.id] || []).forEach(e => { if(e.type === 'food' && e.foodId === food.id){ e.name = food.name; e.per100 = per100Of(food.per100); ch = true; } }));
+    if(ch) touch(pl);
+  });
+}
+/* volta pra tela de onde a pessoa veio, já com o alimento atualizado */
+function returnFromFood(ret, foodId){
+  if(!ret){
+    const tg = state.ingTarget || { kind: 'recipe' };
+    if(foodId && (tg.kind === 'meal' || activeRecipe())){ openIngSheet(null, tg); pickFood(foodId); }
+    return;
+  }
+  if(ret.kind === 'new'){ openIngSheet(ret.ingId || null, ret.target); if(foodId) pickFood(foodId); return; }
+  if(ret.kind === 'mealadd'){ openMealAdd(ret.meal); state.sheet.draft.q = ret.q || ''; const i = document.getElementById('meal-q'); if(i) i.value = state.sheet.draft.q; renderMealResults(); return; }
+  if(ret.kind === 'search'){ openIngSheet(ret.ingId || null, ret.target); state.sheet.food = null; state.sheet.draft.q = ret.q || ''; renderIngSheet(); return; }
+  if(ret.kind === 'picked'){
+    openIngSheet(ret.ingId || null, ret.target);
+    const f = foodId ? findFood(foodId) : null;
+    if(f){ state.sheet.food = { id: f.id, name: f.name, per100: per100Of(f.per100) }; Object.assign(state.sheet.draft, ret.draft); renderIngSheet(); }
+  }
 }
 function saveFoodSheet(){
-  const d = state.sheet.draft;
+  const s = state.sheet, d = s.draft;
   const name = d.name.trim(), base = parseNum(d.base) || 100, kcal = parseNum(d.kcal);
   if(!name){ document.getElementById('d-fname').style.borderColor = '#E74C3C'; return; }
   if(kcal === null){ const f = document.getElementById('d-fkcal'); f.style.borderColor = '#E74C3C'; f.focus(); return; }
   const k = 100 / base;
-  const food = { id: uid('c'), name: cap(name), updatedAt: 0, deleted: false,
-    per100: { kcal: round2(kcal*k), p: round2((parseNum(d.p)||0)*k), c: round2((parseNum(d.c)||0)*k), f: round2((parseNum(d.f)||0)*k), fib: round2((parseNum(d.fib)||0)*k) } };
-  state.foods.push(food); touch(food);
+  const per100 = { kcal: round2(kcal*k), p: round2((parseNum(d.p)||0)*k), c: round2((parseNum(d.c)||0)*k), f: round2((parseNum(d.f)||0)*k), fib: round2((parseNum(d.fib)||0)*k) };
+  let food;
+  if(s.editId){
+    food = state.foods.find(x => x.id === s.editId);
+    food.name = cap(name); food.per100 = per100; touch(food);
+    propagateFood(food);
+  } else {
+    food = { id: uid('c'), name: cap(name), updatedAt: 0, deleted: false, per100 };
+    state.foods.push(food); touch(food);
+  }
   closeSheet();
-  const tg = state.ingTarget || { kind: 'recipe' };
-  if(tg.kind === 'meal' || activeRecipe()){ openIngSheet(null, tg); pickFood(food.id); }
+  if(state.screen === 'recipe'){ renderRecipeStats(); renderRecipeIngs(); }
+  if(state.screen === 'day') refreshDay();
+  returnFromFood(s.ret, food.id);
+  toast(s.editId ? `"${food.name}" atualizado ✅` : `"${food.name}" salvo ⭐`);
+}
+function deleteFood(){
+  const s = state.sheet, food = state.foods.find(x => x.id === s.editId); if(!food) return;
+  food.deleted = true; touch(food);
+  closeSheet();
+  const ret = s.ret && s.ret.kind === 'picked' ? { ...s.ret, kind: 'search', q: '' } : s.ret;
+  returnFromFood(ret || { kind: 'search', target: state.ingTarget || { kind: 'recipe' } }, null);
+  toast(`"${food.name}" excluído (receitas que já usam continuam com as calorias)`, 'Desfazer', () => { food.deleted = false; touch(food); if(state.sheet && state.sheet.type === 'ing') renderIngResults(); if(state.sheet && state.sheet.type === 'mealadd') renderMealResults(); }, 6000);
 }
 
 /* --- mandar ingredientes para uma lista de compras --- */
@@ -1294,7 +1356,7 @@ function renderMealResults(){
   if(recs.length) html += `<p class="sugg-title">🍲 Suas receitas</p>` + recs.map(r => `
     <button class="res-row" data-act="meal-pick-rec" data-id="${esc(r.id)}"><span>${esc(r.name)}</span><small>${kcalTxt(recipeTotals(r).por.kcal)}<br/>por porção</small></button>`).join('');
   if(foods.length) html += `<p class="sugg-title">🥕 Alimentos</p>` + foods.map(f => `
-    <button class="res-row" data-act="meal-pick-food" data-food="${esc(f.id)}"><span>${f.mine ? '⭐ ' : ''}${esc(f.name)}</span><small>${kcalTxt(f.per100.kcal)}<br/>em 100 g</small></button>`).join('');
+    <div class="res-wrap"><button class="res-row" data-act="meal-pick-food" data-food="${esc(f.id)}"><span>${f.mine ? '⭐ ' : ''}${esc(f.name)}</span><small>${kcalTxt(f.per100.kcal)}<br/>em 100 g</small></button>${f.mine ? `<button class="res-edit" data-act="food-edit" data-food="${esc(f.id)}" aria-label="Editar alimento">✏️</button>` : ''}</div>`).join('');
   if(q && !TACO) html += '<p class="hint">Carregando tabela de alimentos…</p>';
   if(q) html += `<button class="res-row new" data-act="meal-food-new"><span>➕ Criar "${esc(cap(s.draft.q.trim()))}"</span><small>com os dados<br/>da embalagem</small></button>`;
   if(!html) html = `<p class="hint" style="color:var(--gray)">Digite pra buscar (ex: "pão", "banana", "iogurte").${liveRecipes().length ? '' : ' Suas receitas da aba 🍲 também aparecem aqui.'}</p>`;
@@ -3092,7 +3154,18 @@ document.addEventListener('click', e => {
     }
     case 'ing-save': saveIngSheet(); break;
     case 'ing-del': { const sh = state.sheet; closeSheet(); if(sh.target && sh.target.kind === 'meal') removeMealEntry(sh.target.date, sh.target.meal, sh.ingId); else removeIng(sh.ingId); break; }
-    case 'food-new': openFoodSheet(state.sheet.draft.q); break;
+    case 'food-new': openFoodSheet(state.sheet.draft.q, null, { kind: 'new', target: state.sheet.target, ingId: state.sheet.ingId, q: state.sheet.draft.q }); break;
+    case 'food-edit': {
+      const sh = state.sheet;
+      const ret = sh.type === 'mealadd' ? { kind: 'mealadd', meal: sh.meal, q: sh.draft.q } : { kind: 'search', target: sh.target, ingId: sh.ingId, q: sh.draft.q };
+      openFoodSheet('', el.dataset.food, ret); break;
+    }
+    case 'food-edit-picked': {
+      const sh = state.sheet;
+      openFoodSheet('', sh.food.id, { kind: 'picked', target: sh.target, ingId: sh.ingId, foodId: sh.food.id, draft: { ...sh.draft } }); break;
+    }
+    case 'food-del': deleteFood(); break;
+    case 'food-cancel': { const sh = state.sheet; closeSheet(); if(sh.ret) returnFromFood(sh.ret.kind === 'new' ? { ...sh.ret, kind: 'search' } : sh.ret, sh.ret.foodId || null); break; }
     case 'food-save': saveFoodSheet(); break;
     case 'recipe-to-list': openToListSheet({ kind: 'recipe', id: state.recipeId }); break;
     case 'times-inc': case 'times-dec': {
