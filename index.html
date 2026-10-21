@@ -284,6 +284,14 @@
   .modal-btn.sel{background:var(--navy);color:#fff;} .modal-btn.sel span{color:var(--lightblue);}
   .chip.dis{opacity:.35;}
 
+  /* arrastar pro lado pra excluir */
+  .swipe-wrap{position:relative;margin-bottom:8px;border-radius:18px;overflow:hidden;}
+  .swipe-wrap > .hist-card{margin-bottom:0;}
+  .swipe-bg{position:absolute;inset:0;background:#F3C5C5;color:var(--red);font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:flex-end;padding-right:22px;border-radius:18px;transition:background .15s;}
+  .swipe-wrap.armed .swipe-bg{background:#E74C3C;color:#fff;}
+  .swipe-card{position:relative;touch-action:pan-y;transition:transform .2s ease;will-change:transform;user-select:none;-webkit-user-select:none;}
+  .swipe-hint{font-size:12px;color:var(--gray);font-weight:600;margin:0 0 8px;text-align:center;}
+
   /* toast */
   .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 86px);transform:translate(-50%,20px);opacity:0;pointer-events:none;background:var(--ink);color:#fff;border-radius:14px;padding:12px 14px;font-size:14px;font-weight:600;display:flex;gap:14px;align-items:center;max-width:calc(100% - 32px);width:max-content;z-index:60;transition:all .2s;box-shadow:0 8px 24px rgba(0,0,0,.25);}
   .toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
@@ -619,13 +627,14 @@ function renderRecipes(){
   const cards = shown.map(r => {
     const { por } = recipeTotals(r);
     return `
-      <div class="card hist-card" data-act="open-recipe" data-id="${esc(r.id)}">
+      <div class="swipe-wrap" data-swipe="del-recipe" data-id="${esc(r.id)}"><div class="swipe-bg">🗑️ Excluir</div>
+      <div class="card hist-card swipe-card" data-act="open-recipe" data-id="${esc(r.id)}">
         <div class="hist-main">
           <p class="hist-title">${esc(r.name)}</p>
           <p class="hist-sub">${r.ingredients.length} ${r.ingredients.length === 1 ? 'ingrediente' : 'ingredientes'} · rende ${fmtQty(r.portions)} ${r.portions == 1 ? 'porção' : 'porções'}</p>
         </div>
         <div style="text-align:right"><span class="hist-total">${kcalTxt(por.kcal)}</span><p class="hist-sub" style="margin:0">por porção</p></div>
-      </div>`;
+      </div></div>`;
   }).join('');
   return `
     <div class="header">
@@ -639,6 +648,7 @@ function renderRecipes(){
     <div class="section">
       ${all.length > 4 ? `<input class="quick-input" id="recipe-search" placeholder="🔎 Buscar receita ou ingrediente" value="${esc(state.recipeSearch)}" style="width:100%;margin-bottom:12px" />` : ''}
       ${all.length === 0 ? `<div class="empty" style="margin-top:6px">🍲<br/><br/>Nenhuma receita ainda.<br/>Toque em "Nova receita" e adicione os ingredientes —<br/>eu calculo as calorias.</div>` : ''}
+      ${all.length ? `<p class="swipe-hint">👈 Arraste uma receita pro lado pra excluir</p>` : ''}
       <div id="recipe-cards">${cards || (all.length ? '<p style="text-align:center;color:var(--gray);font-size:13px">Nada encontrado.</p>' : '')}</div>
     </div>
     ${bottomNav('recipes')}`;
@@ -2127,14 +2137,15 @@ function renderHome(){
   }).join('');
 
   const histCards = hist.map(l => `
-    <div class="card hist-card" data-act="open" data-id="${esc(l.id)}">
+    <div class="swipe-wrap" data-swipe="del-list" data-id="${esc(l.id)}"><div class="swipe-bg">🗑️ Excluir</div>
+    <div class="card hist-card swipe-card" data-act="open" data-id="${esc(l.id)}">
       <div class="hist-main">
         <p class="hist-title">${esc(listTitle(l))}</p>
         <p class="hist-sub">${fmtDate(l.date)} · ${l.items.length} ${l.items.length===1?'item':'itens'}${l.market ? ' · '+esc(l.market) : ''}</p>
       </div>
       <span class="hist-total">${brl(listSpent(l))}</span>
       <button class="hist-del" data-act="del-list" data-id="${esc(l.id)}" aria-label="Apagar lista">✕</button>
-    </div>`).join('');
+    </div></div>`).join('');
 
   return `
     <div class="header">
@@ -2908,7 +2919,49 @@ function hideToast(){ document.getElementById('toast').classList.remove('show');
    ========================================================= */
 document.addEventListener('mousedown', e => { if(e.target.closest('.keep-focus')) e.preventDefault(); });
 
+/* ---------- arrastar pro lado (excluir receita / lista) ---------- */
+let swp = null, swipeEndAt = 0;
+document.addEventListener('pointerdown', e => {
+  const card = e.target.closest('.swipe-card'); if(!card || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  if(e.target.closest('.hist-del')) return;
+  swp = { wrap: card.parentElement, card, id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dir: null };
+});
+document.addEventListener('pointermove', e => {
+  if(!swp || e.pointerId !== swp.id) return;
+  const dx = e.clientX - swp.x, dy = e.clientY - swp.y;
+  if(!swp.dir){
+    if(Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    swp.dir = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'h' : 'v';
+    if(swp.dir === 'h'){ try{ swp.card.setPointerCapture(e.pointerId); }catch(_){} }
+  }
+  if(swp.dir !== 'h') return;
+  swp.dx = Math.min(0, dx);
+  swp.card.style.transition = 'none';
+  swp.card.style.transform = `translateX(${swp.dx}px)`;
+  swp.wrap.classList.toggle('armed', swp.dx < -Math.min(140, swp.wrap.offsetWidth * 0.35));
+});
+function endSwipe(e){
+  if(!swp || (e && e.pointerId !== swp.id)) return;
+  const s = swp; swp = null;
+  if(s.dir !== 'h') return;
+  swipeEndAt = Date.now();
+  s.card.style.transition = '';
+  if(s.wrap.classList.contains('armed')){
+    s.card.style.transform = 'translateX(-110%)';
+    s.wrap.style.transition = 'opacity .2s'; s.wrap.style.opacity = '.4';
+    const act = s.wrap.dataset.swipe, id = s.wrap.dataset.id;
+    if(navigator.vibrate) try{ navigator.vibrate(15); }catch(_){}
+    setTimeout(() => { if(act === 'del-recipe') deleteRecipe(id); else if(act === 'del-list') deleteList(id); }, 180);
+  } else {
+    s.card.style.transform = '';
+    s.wrap.classList.remove('armed');
+  }
+}
+document.addEventListener('pointerup', endSwipe);
+document.addEventListener('pointercancel', e => { if(swp && e.pointerId === swp.id){ swp.card.style.transition = ''; swp.card.style.transform = ''; swp.wrap.classList.remove('armed'); swp = null; } });
+
 document.addEventListener('click', e => {
+  if(Date.now() - swipeEndAt < 400 && e.target.closest('.swipe-wrap')){ e.preventDefault(); return; }
   const el = e.target.closest('[data-act]');
   if(!el){
     if(e.target.classList && e.target.classList.contains('overlay')) closeOverlays();
