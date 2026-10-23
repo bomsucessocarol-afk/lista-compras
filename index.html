@@ -311,6 +311,14 @@
   .lbl-head{font-weight:800;}
   .lbl-demo p{margin:6px 0 0;font-size:12px;color:var(--navy);font-weight:600;}
 
+  /* busca dentro da lista */
+  .search-box{display:flex;align-items:center;gap:8px;background:#fff;border-radius:14px;padding:4px 6px 4px 14px;box-shadow:0 2px 10px rgba(27,26,51,.06);border:2px solid transparent;}
+  .search-box:focus-within{border-color:var(--lightblue);}
+  .search-box input{flex:1;min-width:0;border:none;outline:none;font-size:16px;padding:10px 0;background:transparent;color:var(--ink);font-family:inherit;}
+  .search-box button{width:36px;height:36px;border-radius:10px;color:var(--gray);font-size:15px;}
+  .search-box button.hide{visibility:hidden;}
+  .search-res{font-size:13px;font-weight:700;color:var(--green);margin:0 0 8px 4px;}
+
   /* toast */
   .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 86px);transform:translate(-50%,20px);opacity:0;pointer-events:none;background:var(--ink);color:#fff;border-radius:14px;padding:12px 14px;font-size:14px;font-weight:600;display:flex;gap:14px;align-items:center;max-width:calc(100% - 32px);width:max-content;z-index:60;transition:all .2s;box-shadow:0 8px 24px rgba(0,0,0,.25);}
   .toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
@@ -2176,6 +2184,7 @@ const state = {
   activeId: null,
   sync: 'syncing',
   quick: '',
+  listSearch: '',
   cartOpen: true,
   showAllHistory: false,
   sheet: null,
@@ -2429,6 +2438,10 @@ function renderList(){
         <div id="sugg-box"></div>
       </div>
     </div>
+    ${l.items.length ? `<div class="section"><div class="search-box">
+      <span>🔎</span><input id="list-search" placeholder="Procurar nesta lista (ex: queijo)" autocomplete="off" value="${esc(state.listSearch)}" />
+      <button data-act="list-search-clear" class="${state.listSearch ? '' : 'hide'}" aria-label="Limpar busca">✕</button>
+    </div></div>` : ''}
     <div class="section" id="items-box"></div>`;
 }
 
@@ -2497,6 +2510,16 @@ function renderItems(){
   if(!box || !l) return;
   if(!l.items.length){
     box.innerHTML = `<div class="empty">🛒<br/>Lista vazia.<br/>Digite um item acima ou toque numa sugestão.</div>`;
+    return;
+  }
+  const q = norm(state.listSearch);
+  if(q){
+    const words = q.split(' ');
+    const hit = l.items.filter(i => { const t = norm([i.name, i.brand, i.pack, catById(i.category).label].join(' ')); return words.every(w => t.includes(w)); })
+      .sort((a,b) => (a.bought - b.bought) || a.name.localeCompare(b.name, 'pt-BR'));
+    box.innerHTML = hit.length
+      ? `<p class="search-res">✅ ${hit.length} ${hit.length > 1 ? 'itens encontrados' : 'item encontrado'} com "${esc(state.listSearch.trim())}"</p><div class="card group">${hit.map(rowHtml).join('')}</div>`
+      : `<div class="empty">🔎 Não tem "<b>${esc(state.listSearch.trim())}</b>" nesta lista.<br/><br/><button class="cta" data-act="search-add" style="max-width:260px;margin:0 auto">+ Adicionar "${esc(cap(state.listSearch.trim()))}"</button></div>`;
     return;
   }
   const pend = l.items.filter(i=>!i.bought), cart = l.items.filter(i=>i.bought);
@@ -2595,7 +2618,7 @@ function renderSummary(){
    AÇÕES
    ========================================================= */
 function openList(id){
-  state.activeId = id; state.screen = 'list'; state.quick = '';
+  state.activeId = id; state.screen = 'list'; state.quick = ''; state.listSearch = '';
   render(); window.scrollTo(0,0);
 }
 function goHome(){
@@ -3410,6 +3433,14 @@ document.addEventListener('click', e => {
     case 'toggle': toggleItem(id); break;
     case 'edit': openItemSheet(id); break;
     case 'price': openPriceSheet(id, false); break;
+    case 'list-search-clear': { state.listSearch = ''; const i = document.getElementById('list-search'); if(i){ i.value = ''; } el.classList.add('hide'); renderItems(); break; }
+    case 'search-add': {
+      const name = state.listSearch.trim(); if(!name) break;
+      const p = parseQuick(name); addItemToActive(buildItemFromName(p.name, p.qty, p.unit));
+      state.listSearch = ''; const i = document.getElementById('list-search'); if(i) i.value = '';
+      const c = document.querySelector('[data-act="list-search-clear"]'); if(c) c.classList.add('hide');
+      renderItems(); break;
+    }
     case 'toggle-cart': state.cartOpen = !state.cartOpen; renderItems(); break;
     case 'finish': finishList(); break;
     case 'reopen': { const l = active(); if(l){ l.status = 'open'; touch(l); render(); } break; }
@@ -3450,6 +3481,10 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if(t.id === 'quick-input'){ state.quick = t.value; renderSugg(); return; }
+  if(t.id === 'list-search'){
+    state.listSearch = t.value; renderItems();
+    const c = document.querySelector('[data-act="list-search-clear"]'); if(c) c.classList.toggle('hide', !t.value); return;
+  }
   if(t.id === 'recipe-search'){
     state.recipeSearch = t.value;
     const tmp = document.createElement('div'); tmp.innerHTML = renderRecipes();
