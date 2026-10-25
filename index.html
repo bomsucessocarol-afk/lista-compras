@@ -319,6 +319,25 @@
   .search-box button.hide{visibility:hidden;}
   .search-res{font-size:13px;font-weight:700;color:var(--green);margin:0 0 8px 4px;}
 
+  /* pagamento e desconto */
+  .pay-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+  .pay-grid .chip{border-radius:12px;text-align:left;padding:10px;}
+  .pay-amt{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+  .pay-amt span{flex:1;font-size:13px;font-weight:700;color:var(--navy);}
+  .pay-amt .text-input{width:130px;flex:none;text-align:right;}
+  .prio-row .chip small{font-size:10px;font-weight:600;opacity:.8;}
+  .pay-sum{background:var(--bg);box-shadow:none;}
+  .ps-row{display:flex;justify-content:space-between;font-size:14px;color:var(--ink);padding:3px 0;}
+  .ps-row.disc{color:var(--green);font-weight:700;}
+  .ps-row.total{border-top:1px dashed #C9CEDC;margin-top:4px;padding-top:7px;font-size:17px;}
+  .ps-check{margin:6px 0 0;font-size:12px;font-weight:700;color:var(--green);}
+  .ps-check.bad{color:#9A6A00;}
+  .hist-pay{color:var(--navy-2);font-weight:600;}
+  .pay-bar{display:flex;align-items:center;gap:10px;padding:6px 0;}
+  .pay-bar span:first-child{width:140px;font-size:12.5px;font-weight:700;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pay-bar .bar-track{height:10px;}
+  .pay-bar b{font-size:13px;min-width:78px;text-align:right;}
+
   /* toast */
   .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 86px);transform:translate(-50%,20px);opacity:0;pointer-events:none;background:var(--ink);color:#fff;border-radius:14px;padding:12px 14px;font-size:14px;font-weight:600;display:flex;gap:14px;align-items:center;max-width:calc(100% - 32px);width:max-content;z-index:60;transition:all .2s;box-shadow:0 8px 24px rgba(0,0,0,.25);}
   .toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto;}
@@ -398,6 +417,15 @@ const CATEGORIES = [
   {id:"outros", label:"Outros", emoji:"📦"},
 ];
 const UNITS = ['un','kg','g','L','ml','pct','cx','dz'];
+const PAYS = [
+  { id: 'va',       label: 'Vale alimentação', short: 'VA',       emoji: '🍽️' },
+  { id: 'vr',       label: 'Vale refeição',    short: 'VR',       emoji: '🥪' },
+  { id: 'credito',  label: 'Cartão de crédito', short: 'Crédito', emoji: '💳' },
+  { id: 'debito',   label: 'Cartão de débito', short: 'Débito',   emoji: '🏧' },
+  { id: 'pix',      label: 'Pix',              short: 'Pix',      emoji: '⚡' },
+  { id: 'dinheiro', label: 'Dinheiro',         short: 'Dinheiro', emoji: '💵' },
+];
+const PAY_BY = Object.fromEntries(PAYS.map(p => [p.id, p]));
 const PRIO_ORDER = {alta:0, normal:1, baixa:2};
 
 /* palavras-chave para adivinhar a categoria (sem acento) */
@@ -494,6 +522,9 @@ function normalizeLists(raw){
     market: l.market || '',
     meta: (l.meta === undefined || l.meta === null) ? '' : l.meta,
     status: l.status === 'open' || l.status === 'done' ? l.status : null,
+    discount: Number(l.discount) > 0 ? round2(Number(l.discount)) : 0,
+    discountSpread: Number(l.discountSpread) > 0 ? round2(Number(l.discountSpread)) : 0,
+    payments: (Array.isArray(l.payments) ? l.payments : []).filter(p => p && PAY_BY[p.m]).map(p => ({ m: p.m, amount: Number(p.amount) > 0 ? round2(Number(p.amount)) : null })),
     updatedAt: Number(l.updatedAt) || 0,
     deleted: !!l.deleted,
     items: (Array.isArray(l.items) ? l.items : []).filter(Boolean).map(it => {
@@ -2023,9 +2054,26 @@ function parseReceipt(text){
   let date = null;
   if(dm){ const y = dm[3].length === 2 ? '20' + dm[3] : dm[3]; const cand = `${y}-${dm[2]}-${dm[1]}`; if(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(cand) && cand <= todayStr()) date = cand; }
   const firstLines = t.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(0, 6);
-  const marketLine = firstLines.find(l => (l.match(/[A-Za-zÀ-ÿ]/g) || []).length >= 5 && !/cnpj|cpf|documento|danfe|nfc|consulta|auxiliar|sefaz|fazenda|secretaria|governo/i.test(norm(l)));
+  const marketLine = firstLines.find(l => (l.match(/[A-Za-zÀ-ÿ]/g) || []).length >= 5 && !/cnpj|cpf|documento|danfe|nfc|consulta|auxiliar|sefaz|fazenda|secretaria|governo|codigo|qtde|vl\.|unit|\d{3,}/i.test(norm(l)));
   const market = marketLine ? cap(marketLine.replace(/\b(ltda|me|epp|eireli|s\.?\/?a\.?)\b\.?/ig, '').replace(/[-–,.]+\s*$/, '').trim().toLowerCase()).replace(/(^|\s)(\S)/g, (a, b, c) => b + c.toUpperCase()).slice(0, 40) : '';
-  return { items, total, date, market, portal };
+  const money = re => { const mm = flat.match(re); return mm ? rcNum(mm[1]) : null; };
+  const gross = money(/valor\s+total\s*(?:r\$)?\s*:?\s*(\d{1,6}(?:\.\d{3})*,\d{2})/i);
+  const itemDisc = items.some(i => i.discount); // no cupom impresso o desconto já foi tirado do próprio produto
+  const discount = itemDisc ? 0 : money(/descontos?\s*(?:r\$)?\s*:?\s*-?\s*(\d{1,6}(?:\.\d{3})*,\d{2})/i);
+  const toPay = money(/valor\s+a\s+pagar\s*(?:r\$)?\s*:?\s*(\d{1,6}(?:\.\d{3})*,\d{2})/i);
+  // forma de pagamento (parte depois de "Forma de pagamento")
+  const fpIdx = flat.search(/forma\s+de\s+pagamento/i);
+  const fp = fpIdx >= 0 ? flat.slice(fpIdx) : '';
+  const payments = [];
+  const pre = /(vale\s*alimenta[cç][aã]o|vale\s*refei[cç][aã]o|cart[aã]o\s*de\s*cr[eé]dito|cart[aã]o\s*de\s*d[eé]bito|pagamento\s*instant[aâ]neo\s*\(?pix\)?|pix|dinheiro|cr[eé]dito|d[eé]bito|alimenta[cç][aã]o|refei[cç][aã]o)\s*:?\s*(?:r\$)?\s*:?\s*(\d{1,6}(?:\.\d{3})*,\d{2})/gi;
+  let pm;
+  while((pm = pre.exec(fp))){
+    const k = norm(pm[1]);
+    const id = /alimenta/.test(k) ? 'va' : /refei/.test(k) ? 'vr' : /cred/.test(k) ? 'credito' : /deb/.test(k) ? 'debito' : /pix|instant/.test(k) ? 'pix' : 'dinheiro';
+    const ex = payments.find(x => x.m === id); const v = rcNum(pm[2]);
+    if(ex) ex.amount = round2(ex.amount + v); else payments.push({ m: id, amount: v });
+  }
+  return { items, total: toPay !== null ? toPay : total, gross, discount: discount || 0, toPay, payments, date, market, portal };
 }
 
 /* abreviações comuns de nota fiscal */
@@ -2132,8 +2180,10 @@ function readReceiptText(){
   if(!text.trim()){ toast('Tire a foto ou cole o texto da nota primeiro.'); return; }
   const r = parseReceipt(text);
   if(!r.items.length){ toast('Não achei produtos com preço nesse texto. Tente pelo QR code da nota.', null, null, 4500); return; }
+  const draft = { market: r.market, date: r.date || todayStr(), discount: r.discount ? numToInput(r.discount) : '', discMode: 'sep', paySel: r.payments.map(p => p.m) };
+  r.payments.forEach(p => { draft['pay_' + p.m] = numToInput(p.amount); });
   state.sheet = { type: 'rcreview', text, qr: state.sheet.qr, items: r.items.map(receiptItemToListItem), off: new Set(),
-    total: r.total, draft: { market: r.market, date: r.date || todayStr() } };
+    total: r.total, gross: r.gross, toPay: r.toPay, draft };
   renderReceiptReview();
 }
 function renderReceiptReview(){
@@ -2156,23 +2206,121 @@ function renderReceiptReview(){
         <div class="item-sub">${brl(it.qty * it.unitPrice)}</div>
       </div>`;
     }).join('')}
-    <div class="ing-preview" style="margin-top:12px"><b>Total: ${brl(sum)}</b>
-      <span>${s.total ? (Math.abs(diff) < 0.05 ? '✅ Confere com o total da nota' : `⚠️ A nota diz ${brl(s.total)} (diferença de ${brl(Math.abs(diff))}) — pode faltar algum item ou desconto`) : 'Confira com o total da sua nota'}</span></div>
+    <div class="card pay-sum" id="rc-totals" style="margin-top:12px"></div>
+    ${discountFieldsHtml(d, true)}
+    ${payPickerHtml(d)}
     <div class="sheet-actions">
       <button class="cta" data-act="rcv-save">Salvar compra</button>
       <button class="ghost-btn" data-act="rcv-back">← Voltar e corrigir o texto</button>
       <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
     </div>`);
+  updatePayTotals();
 }
 function saveReceipt(){
   const s = state.sheet, d = s.draft;
   const items = s.items.filter((_, i) => !s.off.has(i));
   if(!items.length) return;
-  const l = { id: uid('l'), date: /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : todayStr(), name: '', market: (d.market || '').trim(), meta: '', status: 'done', updatedAt: 0, deleted: false, items };
+  const l = { id: uid('l'), date: /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : todayStr(), name: '', market: (d.market || '').trim(), meta: '', status: 'done', updatedAt: 0, deleted: false, items, discount: 0, discountSpread: 0, payments: [] };
+  applyDiscountAndPayments(l, d);
   state.lists.push(l); touch(l);
   closeSheet();
   openList(l.id);
-  toast(`Compra salva ✅ ${items.length} produtos · ${brl(listCart(l))}`, null, null, 4000);
+  toast(`Compra salva ✅ ${items.length} produtos · pago ${brl(listSpent(l))}${l.payments.length ? ' · ' + payTags(l) : ''}`, null, null, 4500);
+}
+
+/* ---------- desconto e forma de pagamento (nota, concluir compra e dados da lista) ---------- */
+function discountFieldsHtml(d, fromReceipt){
+  const disc = parseNum(d.discount) || 0;
+  return `
+    <label class="form-label" for="d-disc">🎁 Desconto do mercado (R$)${fromReceipt && disc ? ' — achei na nota' : ''}</label>
+    <input class="text-input" id="d-disc" data-draft="discount" inputmode="decimal" placeholder="0,00 (se não teve, deixe vazio)" value="${esc(d.discount || '')}" />
+    <div id="disc-mode" style="${disc ? '' : 'display:none'}">
+      <span class="form-label">Como guardar o desconto?</span>
+      <div class="prio-row">
+        <button class="chip ${d.discMode !== 'spread' ? 'sel' : ''}" data-act="disc-mode" data-val="sep">Separado<br/><small>preço de prateleira</small></button>
+        <button class="chip ${d.discMode === 'spread' ? 'sel' : ''}" data-act="disc-mode" data-val="spread">Dividir nos produtos<br/><small>preço que paguei</small></button>
+      </div>
+    </div>`;
+}
+function payPickerHtml(d){
+  const sel = d.paySel || [];
+  return `
+    <span class="form-label">💳 Como você pagou? <small style="font-weight:600">(pode marcar mais de um)</small></span>
+    <div class="pay-grid">${PAYS.map(p => `<button class="chip ${sel.includes(p.id) ? 'sel' : ''}" data-act="pay-pick" data-val="${p.id}">${p.emoji} ${p.label}</button>`).join('')}</div>
+    <div id="pay-amounts">${payAmountsHtml(d)}</div>`;
+}
+function payAmountsHtml(d){
+  const sel = d.paySel || [];
+  if(sel.length < 2) return '';
+  return `<span class="form-label">Quanto em cada um?</span>` + sel.map(id => `
+    <div class="pay-amt"><span>${PAY_BY[id].emoji} ${PAY_BY[id].label}</span>
+      <input class="text-input" data-draft="pay_${id}" inputmode="decimal" placeholder="R$ 0,00" value="${esc(d['pay_' + id] || '')}" /></div>`).join('') + `<p class="hint" id="pay-left"></p>`;
+}
+function sheetGross(){
+  const s = state.sheet;
+  if(s.type === 'rcreview') return s.items.reduce((a, it, i) => a + (s.off.has(i) ? 0 : it.qty * it.unitPrice), 0);
+  const l = s.listId ? getList(s.listId) : active(); return l ? listGross(l) : 0;
+}
+function updatePayTotals(){
+  const s = state.sheet; if(!s || !s.draft) return;
+  const d = s.draft, gross = sheetGross(), disc = parseNum(d.discount) || 0, paid = Math.max(0, gross - disc);
+  const box = document.getElementById('rc-totals');
+  if(box && s.type === 'rcreview'){
+    const ok = s.toPay !== null && s.toPay !== undefined ? Math.abs(s.toPay - paid) < 0.05 : (s.total ? Math.abs(s.total - paid) < 0.05 : null);
+    const ref = s.toPay !== null && s.toPay !== undefined ? s.toPay : s.total;
+    box.innerHTML = `
+      <div class="ps-row"><span>Produtos</span><b>${brl(gross)}</b></div>
+      ${disc ? `<div class="ps-row disc"><span>🎁 Desconto do mercado</span><b>− ${brl(disc)}</b></div>` : ''}
+      <div class="ps-row total"><span>Você pagou</span><b>${brl(paid)}</b></div>
+      <p class="ps-check ${ok === false ? 'bad' : ''}">${ok === null ? 'Confira com o total da sua nota' : ok ? '✅ Confere com o valor pago na nota' : `⚠️ A nota diz ${brl(ref)} (diferença de ${brl(Math.abs(ref - paid))}) — confira o desconto ou algum item`}</p>`;
+  }
+  const dm = document.getElementById('disc-mode'); if(dm) dm.style.display = disc ? '' : 'none';
+  const left = document.getElementById('pay-left');
+  if(left){
+    const sum = (d.paySel || []).reduce((a, id) => a + (parseNum(d['pay_' + id]) || 0), 0), rest = round2(paid - sum);
+    left.textContent = Math.abs(rest) < 0.01 ? '✅ Valores conferem com o total pago' : rest > 0 ? `Falta informar ${brl(rest)}` : `Passou ${brl(-rest)} do total pago`;
+    left.style.color = Math.abs(rest) < 0.01 ? 'var(--green)' : '#9A6A00';
+  }
+}
+function applyDiscountAndPayments(l, d){
+  const disc = Math.max(0, parseNum(d.discount) || 0);
+  const gross = listGross(l);
+  l.discount = 0; l.discountSpread = 0;
+  if(disc > 0 && gross > 0){
+    if(d.discMode === 'spread'){
+      const f = Math.max(0, (gross - disc) / gross);
+      l.items.forEach(it => { if(it.unitPrice !== null) it.unitPrice = Math.round(it.unitPrice * f * 10000) / 10000; });
+      l.discountSpread = round2(disc);
+    } else l.discount = round2(disc);
+  }
+  const sel = d.paySel || [];
+  l.payments = sel.map(id => ({ m: id, amount: sel.length > 1 ? (parseNum(d['pay_' + id]) || null) : null }));
+}
+function payDraftFrom(l){
+  const d = { discount: l.discount ? numToInput(l.discount) : '', discMode: 'sep', paySel: (l.payments || []).map(p => p.m) };
+  (l.payments || []).forEach(p => { if(p.amount) d['pay_' + p.m] = numToInput(p.amount); });
+  return d;
+}
+/* ao concluir a compra: pergunta como pagou */
+function openPaySheet(listId){
+  const l = getList(listId); if(!l) return;
+  state.sheet = { type: 'pay', listId, draft: payDraftFrom(l) };
+  openSheetHtml(`
+    <p class="overlay-title">🎉 Compra concluída!</p>
+    <p class="overlay-sub">Total: <b>${brl(listGross(l))}</b>. Quer anotar como pagou?</p>
+    ${payPickerHtml(state.sheet.draft)}
+    ${discountFieldsHtml(state.sheet.draft, false)}
+    <div class="sheet-actions">
+      <button class="cta" data-act="pay-save">Salvar</button>
+      <button class="ghost-btn" data-act="sheet-close">Pular</button>
+    </div>`);
+  updatePayTotals();
+}
+function savePaySheet(){
+  const s = state.sheet, l = getList(s.listId); if(!l) return;
+  applyDiscountAndPayments(l, s.draft); touch(l);
+  closeSheet(); render();
+  toast(`Anotado ✅ pago ${brl(listSpent(l))}${l.payments.length ? ' · ' + payTags(l) : ''}`);
 }
 
 /* =========================================================
@@ -2207,7 +2355,18 @@ const active = () => getList(state.activeId);
 const itemSub = it => it.unitPrice === null ? null : (Number(it.qty)||0) * it.unitPrice;
 const listEstimated = l => l.items.reduce((s,it) => s + (itemSub(it)||0), 0);
 const listCart = l => l.items.filter(i=>i.bought).reduce((s,it) => s + (itemSub(it)||0), 0);
-const listSpent = l => l.items.some(i=>i.bought) ? listCart(l) : listEstimated(l);
+const listGross = l => l.items.some(i=>i.bought) ? listCart(l) : listEstimated(l);
+const listSpent = l => Math.max(0, listGross(l) - (l.discount || 0));
+/* formas de pagamento */
+function listPayments(l){
+  const ps = l.payments || []; if(!ps.length) return [];
+  const total = listSpent(l);
+  if(ps.length === 1) return [{ m: ps[0].m, amount: ps[0].amount || total }];
+  const known = ps.reduce((a, p) => a + (p.amount || 0), 0);
+  const blanks = ps.filter(p => !p.amount).length;
+  return ps.map(p => ({ m: p.m, amount: p.amount || (blanks ? Math.max(0, total - known) / blanks : 0) }));
+}
+const payTags = l => (l.payments || []).map(p => PAY_BY[p.m].emoji + ' ' + PAY_BY[p.m].short).join(' + ');
 const listTitle = l => l.name || ('Lista de ' + fmtDateShort(l.date));
 
 /* toda alteração passa por aqui: salva no celular e agenda envio pra nuvem */
@@ -2395,6 +2554,7 @@ function renderHome(){
       <div class="hist-main">
         <p class="hist-title">${esc(listTitle(l))}</p>
         <p class="hist-sub">${fmtDate(l.date)} · ${l.items.length} ${l.items.length===1?'item':'itens'}${l.market ? ' · '+esc(l.market) : ''}</p>
+        ${l.payments.length || l.discount || l.discountSpread ? `<p class="hist-sub hist-pay">${l.payments.length ? esc(payTags(l)) : ''}${(l.discount || l.discountSpread) ? `${l.payments.length ? ' · ' : ''}🎁 −${brl(l.discount || l.discountSpread)}` : ''}</p>` : ''}
       </div>
       <span class="hist-total">${brl(listSpent(l))}</span>
       <button class="hist-del" data-act="del-list" data-id="${esc(l.id)}" aria-label="Apagar lista">✕</button>
@@ -2473,6 +2633,9 @@ function renderStats(){
         ? `<div class="meta-line ${over?'over':''}">🎯 Meta ${brl(meta)} · ${over ? 'passou '+brl(est-meta) : 'sobram '+brl(meta-est)}</div>`
         : `<button class="link-btn" data-act="list-settings">🎯 Definir meta de gasto</button>`}
       ${unpriced ? `<div class="hint">💡 ${unpriced} ${unpriced>1?'itens sem preço — não entram':'item sem preço — não entra'} no total</div>` : ''}
+      ${l.discount ? `<div class="meta-line">🎁 Desconto ${brl(l.discount)} · <b>pago ${brl(listSpent(l))}</b></div>` : ''}
+      ${l.discountSpread ? `<div class="meta-line">🎁 Desconto de ${brl(l.discountSpread)} já dividido nos preços</div>` : ''}
+      ${l.payments.length ? `<button class="link-btn" data-act="list-settings" style="display:block;text-decoration:none">${esc(payTags(l))} ✏️</button>` : (l.status === 'done' ? `<button class="link-btn" data-act="list-settings" style="display:block">💳 Informar como pagou</button>` : '')}
     </div>`;
 }
 
@@ -2549,6 +2712,27 @@ function renderItems(){
 function refreshListParts(){ renderStats(); renderSugg(); renderItems(); }
 
 /* ---------- Resumo ---------- */
+function paySummaryHtml(lists, key, monthName){
+  const month = lists.filter(l => l.date.slice(0,7) === key && listSpent(l) > 0);
+  if(!month.length) return '';
+  const by = {}; let none = 0, saved = 0;
+  month.forEach(l => {
+    saved += (l.discount || 0) + (l.discountSpread || 0);
+    const ps = listPayments(l);
+    if(!ps.length) none += listSpent(l); else ps.forEach(p => { by[p.m] = (by[p.m] || 0) + p.amount; });
+  });
+  const rows = PAYS.filter(p => by[p.id]).map(p => ({ lbl: `${p.emoji} ${p.label}`, v: by[p.id] }));
+  if(none > 0) rows.push({ lbl: '❔ Não informado', v: none, muted: true });
+  const max = Math.max(1, ...rows.map(r => r.v));
+  return `
+    <div class="section">
+      <h2 class="section-title">Como você pagou em ${monthName}</h2>
+      <div class="card">
+        ${rows.map(r => `<div class="pay-bar"><span>${r.lbl}</span><div class="bar-track"><div class="bar-fill" style="width:${r.v / max * 100}%;${r.muted ? 'background:#D5D8E3' : ''}"></div></div><b>${brl(r.v)}</b></div>`).join('')}
+        ${saved > 0 ? `<div class="meta-line" style="margin-top:12px">🎁 Você economizou ${brl(saved)} com descontos este mês</div>` : ''}
+      </div>
+    </div>`;
+}
 function renderSummary(){
   const lists = liveLists();
   const now = new Date();
@@ -2617,6 +2801,7 @@ function renderSummary(){
           ${yoyPct !== null ? `<div class="yoy-badge ${yoyPct > 0 ? 'up' : (yoyPct < 0 ? 'down' : 'flat')}">${yoyPct > 0 ? '▲' : (yoyPct < 0 ? '▼' : '—')} ${Math.abs(yoyPct).toFixed(0)}% ${yoyPct > 0 ? 'a mais' : (yoyPct < 0 ? 'a menos' : 'igual')} que no ano passado</div>` : ''}`}
       </div>
     </div>
+    ${paySummaryHtml(lists, curKey, monthNamePt)}
     <div class="section">
       <h2 class="section-title">Itens mais comprados</h2>
       <div class="card">${topItems.length === 0 ? `<p style="text-align:center;font-size:13px;color:var(--gray);margin:0">Nenhum produto registrado ainda.</p>` : rankHtml}</div>
@@ -2719,7 +2904,8 @@ function finishList(){
   const left = l.items.filter(i=>!i.bought).length;
   l.status = 'done'; touch(l);
   state.screen = 'home'; state.activeId = null; render(); window.scrollTo(0,0);
-  toast(left ? `Compra concluída 🎉 ${left} ${left>1?'itens ficaram':'item ficou'} de fora` : 'Compra concluída 🎉', null, null, 4000);
+  if(left) toast(`${left} ${left>1?'itens ficaram':'item ficou'} de fora da compra`, null, null, 3500);
+  openPaySheet(l.id);
 }
 
 /* =========================================================
@@ -2893,7 +3079,7 @@ function addImported(){
 /* --- dados da lista --- */
 function openListSheet(){
   const l = active(); if(!l) return;
-  state.sheet = { type:'list', draft: { name: l.name, market: l.market, date: l.date, meta: numToInput(parseNum(l.meta)) } };
+  state.sheet = { type:'list', draft: { name: l.name, market: l.market, date: l.date, meta: numToInput(parseNum(l.meta)), ...payDraftFrom(l) } };
   openSheetHtml(`
     <p class="overlay-title">Dados da lista</p>
     <label class="form-label" for="d-lname">Nome (opcional)</label>
@@ -2904,6 +3090,8 @@ function openListSheet(){
     <input class="text-input" id="d-date" type="date" data-draft="date" value="${esc(l.date)}" />
     <label class="form-label" for="d-meta">Meta de gasto (opcional)</label>
     <input class="text-input" id="d-meta" data-draft="meta" inputmode="decimal" placeholder="R$ 0,00" value="${esc(numToInput(parseNum(l.meta)))}" />
+    ${l.discountSpread ? `<p class="hint" style="color:var(--green)">🎁 Desconto de ${brl(l.discountSpread)} já está dividido nos preços dos produtos.</p>` : discountFieldsHtml(state.sheet.draft, false).replace(/<div id="disc-mode"[\s\S]*$/, '')}
+    ${payPickerHtml(state.sheet.draft)}
     <div class="sheet-actions">
       <button class="cta" data-act="list-save">Salvar</button>
       <button class="danger-btn" data-act="list-delete">Apagar lista</button>
@@ -2915,6 +3103,9 @@ function saveListSheet(){
   l.name = d.name.trim(); l.market = d.market.trim();
   if(/^\d{4}-\d{2}-\d{2}$/.test(d.date)) l.date = d.date;
   const m = parseNum(d.meta); l.meta = m === null ? '' : round2(m);
+  if(!l.discountSpread) l.discount = Math.max(0, round2(parseNum(d.discount) || 0));
+  const sel = d.paySel || [];
+  l.payments = sel.map(id => ({ m: id, amount: sel.length > 1 ? (parseNum(d['pay_' + id]) || null) : null }));
   touch(l); closeSheet(); render();
 }
 
@@ -3308,6 +3499,15 @@ document.addEventListener('click', e => {
       const box = document.getElementById('sheet-box'), top = box.scrollTop; renderReceiptReview(); box.scrollTop = top; break;
     }
     case 'rcv-save': saveReceipt(); break;
+    case 'pay-pick': {
+      const sel = d.paySel = d.paySel || [];
+      const i = sel.indexOf(val); if(i >= 0) sel.splice(i, 1); else sel.push(val);
+      el.classList.toggle('sel', sel.includes(val));
+      const box = document.getElementById('pay-amounts'); if(box) box.innerHTML = payAmountsHtml(d);
+      updatePayTotals(); break;
+    }
+    case 'disc-mode': pick(); d.discMode = val; break;
+    case 'pay-save': savePaySheet(); break;
     case 'rcv-back': { const t = state.sheet.text, qr = state.sheet.qr; openReceiptSheet(); state.sheet.draft.text = t; state.sheet.qr = qr; document.getElementById('d-rctext').value = t; break; }
     case 'ri-photo': document.getElementById('recipe-photo-input').click(); break;
     case 'ri-paste': {
@@ -3512,6 +3712,7 @@ document.addEventListener('input', e => {
     else if(state.sheet.type === 'mealrec') updateMrPreview();
     else if(state.sheet.type === 'profile') updateProfilePreview();
     else if(state.sheet.type === 'food') updateFoodPreview();
+    else if(['rcreview','pay','list'].includes(state.sheet.type)) updatePayTotals();
     else updatePreview();
   }
 });
@@ -3528,6 +3729,7 @@ document.addEventListener('keydown', e => {
     else if(state.sheet.type === 'ing' && state.sheet.food) saveIngSheet();
     else if(state.sheet.type === 'ing'){ const first = document.querySelector('#ing-results .res-row'); if(first) first.click(); }
     else if(state.sheet.type === 'food') saveFoodSheet();
+    else if(state.sheet.type === 'pay') savePaySheet();
     else if(state.sheet.type === 'mealadd'){ const first = document.querySelector('#meal-results .res-row'); if(first) first.click(); }
     else if(state.sheet.type === 'mealrec') saveMealRecipe();
     else if(state.sheet.type === 'profile') saveProfile();
