@@ -404,10 +404,10 @@ const PRIO_ORDER = {alta:0, normal:1, baixa:2};
 const CAT_WORDS = {
   hortifruti:['banana','maca','tomate','alface','cebola','alho','batata','cenoura','limao','laranja','mamao','abacate','couve','pepino','abobrinha','abobora','brocolis','mandioca','macaxeira','uva','melancia','melao','morango','pimentao','cheiro verde','cebolinha','coentro','salsa','repolho','beterraba','chuchu','inhame','fruta','verdura','legume','tangerina','manga','abacaxi','acai','kiwi','pera','rucula','espinafre','gengibre','quiabo','jilo','maxixe','vagem'],
   acougue:['carne','frango','peito de frango','coxa','sobrecoxa','asa','patinho','acem','alcatra','picanha','costela','linguica','salsicha','bacon','peixe','tilapia','tambaqui','pirarucu','file','moida','porco','lombo','calabresa','musculo','fraldinha','maminha','cupim','bisteca','pernil','figado','camarao','sardinha fresca','hamburguer'],
-  padaria:['pao','bolo','torrada','rosca','bisnaguinha','pao de queijo','sonho','broa','croissant','baguete'],
-  laticinios:['leite','queijo','iogurte','manteiga','requeijao','margarina','nata','creme de leite','mucarela','mussarela','presunto','peito de peru','mortadela','salame','ricota','coalhada','leite condensado'],
+  padaria:['pao de alho','pao alho','pao','bolo','torrada','rosca','bisnaguinha','pao de queijo','sonho','broa','croissant','baguete'],
+  laticinios:['cream cheese','doce de leite','bebida lactea','leite','queijo','iogurte','manteiga','requeijao','margarina','nata','creme de leite','mucarela','mussarela','presunto','peito de peru','mortadela','salame','ricota','coalhada','leite condensado'],
   mercearia:['arroz','feijao','macarrao','acucar','sal','oleo','azeite','farinha','cafe','achocolatado','biscoito','bolacha','molho','extrato','ovo','ovos','aveia','granola','tapioca','fuba','milho','ervilha','sardinha','atum','tempero','vinagre','maionese','ketchup','mostarda','cereal','chocolate','gelatina','fermento','lentilha','grao de bico','castanha','amendoim','pipoca','cha'],
-  bebidas:['refrigerante','refri','suco','agua','cerveja','vinho','guarana','coca','energetico','agua de coco','isotonico'],
+  bebidas:['agua mineral','refrigerante','refri','suco','agua','cerveja','vinho','guarana','coca','energetico','agua de coco','isotonico'],
   limpeza:['sabao','detergente','amaciante','agua sanitaria','desinfetante','esponja','vassoura','rodo','saco de lixo','lixo','multiuso','alcool','limpador','cloro','lustra','pano de chao','pano','inseticida','lava roupa','tira manchas','palha de aco','bombril'],
   higiene:['shampoo','xampu','condicionador','sabonete','pasta de dente','creme dental','escova de dente','escova','desodorante','papel higienico','absorvente','fralda','lenco','cotonete','fio dental','hidratante','protetor solar','barbeador','aparelho de barbear','enxaguante'],
 };
@@ -1934,9 +1934,9 @@ function saveImportedRecipe(){
    NOTA DO MERCADO (cupom fiscal / NFC-e) → lista já comprada
    ========================================================= */
 const RC_SKIP = /\b(total|subtotal|sub-total|desconto|acrescimo|troco|dinheiro|cartao|credito|debito|pix|valor|pago|pagar|tributos|imposto|icms|cnpj|cpf|ie:|i\.e\.|inscricao|lei\s*\d|consumidor|protocolo|chave|serie|emissao|autorizacao|nfc-?e|danfe|documento|qtd\.?\s*total|itens|forma de pagamento|operador|caixa:|via\s|consulte|www\.|http|sefaz|fone|tel[:.]|cep|rua|av\.|avenida)\b/;
-const RC_UNIT = { un: 'un', und: 'un', unid: 'un', pc: 'un', pç: 'un', kg: 'kg', g: 'g', gr: 'g', l: 'L', lt: 'L', ml: 'ml', pct: 'pct', pt: 'pct', cx: 'cx', fd: 'cx', dz: 'dz' };
+const RC_UNIT = { un: 'un', und: 'un', unid: 'un', pc: 'un', pç: 'un', bdj: 'un', bd: 'un', ban: 'un', fr: 'un', lat: 'un', sc: 'un', kg: 'kg', g: 'g', gr: 'g', l: 'L', lt: 'L', ml: 'ml', pct: 'pct', pt: 'pct', pac: 'pct', cx: 'cx', cxa: 'cx', fd: 'cx', fard: 'cx', dz: 'dz' };
 const rcNum = s => parseNum(String(s).replace(/\s/g, ''));
-function rcUnit(u){ return RC_UNIT[norm(u || '').replace('.', '')] || 'un'; }
+function rcUnit(u){ return RC_UNIT[norm(u || '').replace(/[.\d]/g, '')] || 'un'; }
 function rcCleanName(s){
   return String(s || '')
     .replace(/^\s*\d{1,3}\s+/, '')            // nº do item
@@ -1949,7 +1949,7 @@ function rcCleanName(s){
 /* formato do site da Sefaz (ao abrir o QR code): "NOME (Código: 123) Qtde.:1 UN: UN Vl. Unit.: 5,49 Vl. Total 5,49" */
 function parsePortalItems(text){
   const flat = text.replace(/[ \t]+/g, ' ');
-  const re = /\(\s*C[óo]d(?:igo)?\.?:?\s*[\w.-]*\s*\)\s*Qtde\.?\s*:?\s*([\d.,]+)\s*UN\s*:?\s*([A-Za-z.]+)\s*Vl\.?\s*Unit\.?\s*:?\s*([\d.,]+)\s*Vl\.?\s*Total\s*:?\s*([\d.,]+)/gi;
+  const re = /\(\s*C[óo]d(?:igo)?\.?:?\s*[\w.-]*\s*\)\s*Qtde\.?\s*:?\s*([\d.,]+)\s*UN\s*:?\s*([A-Za-zÀ-ÿ.]+\d*)\s*Vl\.?\s*Unit\.?\s*:?\s*([\d.,]+)\s*Vl\.?\s*Total\s*:?\s*([\d.,]+)/gi;
   const out = []; let m, last = 0;
   while((m = re.exec(flat))){
     let name = flat.slice(last, m.index).trim();
@@ -2028,7 +2028,17 @@ function parseReceipt(text){
   return { items, total, date, market, portal };
 }
 
+/* abreviações comuns de nota fiscal */
+const RC_ABBR = [[/\biog\b\.?/gi,'iogurte '],[/\bqjo\b\.?/gi,'queijo '],[/\bbisc\b\.?/gi,'biscoito '],[/\bref\b\.?/gi,'refrigerante '],[/\bmac\b\.?/gi,'macarrão '],
+  [/\bbeb\b\.?/gi,'bebida '],[/\bsalg\b\.?/gi,'salgadinho '],[/\binst\b\.?/gi,'instantâneo '],[/\bc\/g\b/gi,'com gás'],[/\bs\/g\b/gi,'sem gás'],[/\bagua m\b\.?/gi,'água mineral '],
+  [/\bcream c\b\.?/gi,'cream cheese '],[/\bdet\b\.?/gi,'detergente '],[/\bsab\b\.?/gi,'sabão '],[/\bpap\b\.?\s*hig\b\.?/gi,'papel higiênico '],[/\bamac\b\.?/gi,'amaciante '],
+  [/\bcr\b\.?\s*leite/gi,'creme de leite'],[/\blte\b\.?/gi,'leite '],[/\bcond\b\.?/gi,'condensado '],[/\bmarg\b\.?/gi,'margarina '],[/\bfgo\b\.?/gi,'frango '],[/\bchoc\b\.?/gi,'chocolate '],
+  [/\bfile c\.?s\/coxa/gi,'filé de coxa e sobrecoxa'],[/\bsobrec\b\.?/gi,'sobrecoxa '],[/\bbco\b\.?/gi,'branco '],[/\bgd\b\.?/gi,'grande '],[/\bdoce leite\b/gi,'doce de leite'],
+  [/\bpao alho\b/gi,'pão de alho'],[/\bpao\b/gi,'pão'],[/\bfeij\b\.?/gi,'feijão '],[/\barr\b\.?/gi,'arroz '],[/\bacuc\b\.?/gi,'açúcar '],[/\bcafe\b/gi,'café'],[/\bagua\b/gi,'água'],
+  [/\bcappucino\b/gi,'cappuccino'],[/\bsoluvel\b/gi,'solúvel'],[/\bbisn\b\.?/gi,'bisnaga '],[/\btp\b\.?$/gi,''],[/\bla\b$/gi,'lactose']];
+function expandAbbr(n){ let t = ' ' + n + ' '; RC_ABBR.forEach(([re, to]) => { t = t.replace(re, to); }); return t.replace(/\s+/g, ' ').trim(); }
 function receiptItemToListItem(i){
+  i = { ...i, name: expandAbbr(i.name) };
   const sp = splitBrandAndPack(i.name, knownBrandsFromHistory());
   const nm = sp.name || cap(i.name.toLowerCase());
   const h = buildHistory().get(norm(nm));
