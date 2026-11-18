@@ -33,6 +33,7 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="theme-color" content="#383772" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="conta.js"></script>
 <style>
   :root{
     --navy:#383772;
@@ -175,6 +176,29 @@
   .yoy-badge.flat{background:var(--bg);color:var(--gray);}
 
   /* bottom nav */
+  .nav-icon{position:relative;}
+  .nav-lock{position:absolute;right:-12px;top:-4px;font-size:10px;font-style:normal;}
+  .plano-card{position:relative;border:2px solid #E6E7EF;border-radius:18px;padding:14px 14px 12px;margin:12px 0;background:#fff;}
+  .plano-card.foco{border-color:var(--pc);box-shadow:0 6px 18px rgba(27,26,51,.10);}
+  .plano-tag{position:absolute;top:-11px;right:14px;background:var(--yellow);color:var(--navy);font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;}
+  .plano-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
+  .plano-nome{font-weight:800;font-size:17px;color:var(--pc);}
+  .plano-preco{font-weight:800;font-size:18px;color:var(--navy);white-space:nowrap;}
+  .plano-preco small{font-size:12px;font-weight:600;color:var(--gray);}
+  .plano-itens{margin:8px 0 10px;padding-left:2px;list-style:none;font-size:14px;line-height:1.55;}
+  .plano-btn{padding:12px;font-size:15px;background:var(--pc);color:#fff;box-shadow:none;}
+  .plano-meu{text-align:center;font-weight:800;color:var(--green);padding:8px;}
+  .plano-tipo{margin-bottom:4px;}
+  .locked-btn{margin-top:10px;background:#F4F5F9;color:var(--navy);}
+  .link-btn{display:block;width:100%;text-align:center;background:none;border:0;color:var(--navy);font-weight:700;font-size:14px;padding:10px;text-decoration:underline;}
+  .auth-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 18px;}
+  .auth-box{width:100%;max-width:400px;background:#fff;border-radius:24px;padding:24px 20px;box-shadow:0 8px 30px rgba(27,26,51,.08);}
+  .auth-logo{text-align:center;}
+  .auth-logo img{width:72px;height:72px;border-radius:18px;}
+  .auth-title{text-align:center;color:var(--navy);font-size:24px;margin:10px 0 4px;}
+  .auth-sub{text-align:center;color:var(--gray);margin:0 0 10px;font-size:14px;}
+  .auth-msg{background:#FFF7E0;color:#7A5300;border-radius:12px;padding:10px 12px;font-size:14px;font-weight:600;}
+  .sync-badge.local{color:#DDE3F5;}
   .bottomnav{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:center;z-index:10;}
   .bottomnav-inner{max-width:440px;width:100%;background:#fff;box-shadow:0 -2px 12px rgba(0,0,0,.07);border-radius:20px 20px 0 0;display:flex;padding:10px 8px calc(env(safe-area-inset-bottom) + 10px);}
   .nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;font-weight:700;color:var(--gray);}
@@ -384,9 +408,9 @@
 /* =========================================================
    CONFIG
    ========================================================= */
-const SUPABASE_URL = "https://okoxgwkevxzxegqcsgwc.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rb3hnd2tldnh6eGVncWNzZ3djIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjQwNjMsImV4cCI6MjEwMDE0MDA2M30.g50BQ4i1t61Q2uOWVMb-k5NNcwGGyZRvv0BO9EaPQI4";
-const TABLE = 'lista_compras_storage';
+const SUPABASE_URL = APP_CFG.SUPABASE_URL;
+const SUPABASE_ANON_KEY = APP_CFG.SUPABASE_ANON_KEY;
+const TABLE = 'app_dados'; // uma linha por pessoa + chave (protegido por RLS)
 const CLOUD_KEY = 'shopping_lists';
 const CLOUD_BACKUP_KEY = 'shopping_lists_backup_v1';
 const LS_LISTS = 'carol_shopping_lists_v1';
@@ -396,7 +420,7 @@ const LS_CLOUD_BACKUP_DONE = 'carol_cloud_backup_done_v1';
 
 let sb = null;
 function getSb(){
-  if(!sb && window.supabase){
+  if(!sb && window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY){
     try{ sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); }catch(e){ sb = null; }
   }
   return sb;
@@ -2230,6 +2254,7 @@ function saveReceipt(){
 
 /* ---------- desconto e forma de pagamento (nota, concluir compra e dados da lista) ---------- */
 function discountFieldsHtml(d, fromReceipt){
+  if(!temPlano('economia')) return '';
   const disc = parseNum(d.discount) || 0;
   return `
     <label class="form-label" for="d-disc">🎁 Desconto do mercado (R$)${fromReceipt && disc ? ' — achei na nota' : ''}</label>
@@ -2243,6 +2268,7 @@ function discountFieldsHtml(d, fromReceipt){
     </div>`;
 }
 function payPickerHtml(d){
+  if(!temPlano('economia')) return `<button class="ghost-btn locked-btn" data-act="pw-plano" data-val="economia">🔒 Anotar forma de pagamento e desconto · Premium Economia</button>`;
   const sel = d.paySel || [];
   return `
     <span class="form-label">💳 Como você pagou? <small style="font-weight:600">(pode marcar mais de um)</small></span>
@@ -2396,31 +2422,35 @@ function mergeLists(local, cloud){
 const sig = lists => JSON.stringify(lists.slice().sort((a,b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
 async function ensureCloudBackup(client, cloudRaw){
-  try{ if(localStorage.getItem(LS_CLOUD_BACKUP_DONE)) return; }catch(e){ return; }
+  const uid = contaUid(); if(!uid) return;
+  const doneKey = LS_CLOUD_BACKUP_DONE + '_' + uid;
+  try{ if(localStorage.getItem(doneKey)) return; }catch(e){ return; }
   try{
     if(Array.isArray(cloudRaw) && cloudRaw.length){
-      const { data, error } = await client.from(TABLE).select('chave').eq('chave', CLOUD_BACKUP_KEY).maybeSingle();
+      const { data, error } = await client.from(TABLE).select('chave').eq('user_id', uid).eq('chave', CLOUD_BACKUP_KEY).maybeSingle();
       if(error) throw error;
       if(!data){
-        const r = await client.from(TABLE).insert({ chave: CLOUD_BACKUP_KEY, dados: cloudRaw, updated_at: new Date().toISOString() });
+        const r = await client.from(TABLE).insert({ user_id: uid, chave: CLOUD_BACKUP_KEY, dados: cloudRaw, updated_at: new Date().toISOString() });
         if(r.error) throw r.error;
       }
     }
-    localStorage.setItem(LS_CLOUD_BACKUP_DONE, '1');
+    localStorage.setItem(doneKey, '1');
   }catch(e){ console.warn('Backup na nuvem não foi feito:', e); }
 }
 
 let syncing = false, syncAgain = false;
 async function syncNow(){
   const client = getSb();
-  if(!client || !navigator.onLine && navigator.onLine !== undefined){ setSync('off'); return; }
+  const uid = contaUid();
+  if(!client || !uid){ setSync('local'); return; }
+  if(!navigator.onLine && navigator.onLine !== undefined){ setSync('off'); return; }
   if(syncing){ syncAgain = true; return; }
   syncing = true;
   setSync('syncing');
   const startEdits = editCount;
   let failed = false, changed = false;
   try{
-    const { data, error } = await client.from(TABLE).select('chave,dados').in('chave', COLLS.map(c => c.key));
+    const { data, error } = await client.from(TABLE).select('chave,dados').eq('user_id', uid).in('chave', COLLS.map(c => c.key));
     if(error) throw error;
     const rows = {}; (data || []).forEach(r => { rows[r.chave] = r.dados; });
     const dirty = isDirty();
@@ -2431,7 +2461,7 @@ async function syncNow(){
         const merged = mergeLists(state[c.field], c.normalize(cloudRaw));
         const differs = sig(merged) !== sig(Array.isArray(cloudRaw) ? cloudRaw : []);
         if((differs || dirty) && !(merged.length === 0 && cloudRaw === null)){
-          const r = await client.from(TABLE).upsert({ chave: c.key, dados: merged, updated_at: new Date().toISOString() });
+          const r = await client.from(TABLE).upsert({ user_id: uid, chave: c.key, dados: merged, updated_at: new Date().toISOString() }, { onConflict: 'user_id,chave' });
           if(r.error) throw r.error;
         }
         const before = sig(state[c.field]);
@@ -2454,7 +2484,7 @@ async function syncNow(){
 
 function syncBadgeHtml(){
   const s = state.sync;
-  const txt = s === 'ok' ? '☁️ Sincronizado' : s === 'syncing' ? '🔄 Sincronizando…' : (isDirty() ? '📴 Offline · salvo no celular' : '📴 Offline');
+  const txt = s === 'local' ? '📱 Salvo só neste celular' : s === 'ok' ? '☁️ Sincronizado' : s === 'syncing' ? '🔄 Sincronizando…' : (isDirty() ? '📴 Offline · salvo no celular' : '📴 Offline');
   return `<div class="sync-badge ${s}" id="sync-badge">${txt}</div>`;
 }
 function setSync(s){
@@ -2499,6 +2529,9 @@ function safeRender(){
 document.addEventListener('focusout', () => setTimeout(() => { if(pendingRender && !isTyping() && !state.sheet) safeRender(); }, 250));
 
 function render(){
+  if(typeof conta !== 'undefined' && !conta.pronta) return;
+  if(state.screen === 'entrar'){ document.getElementById('app').innerHTML = htmlEntrar(state.authModo); return; }
+  if(precisaBloquearNavegador()){ document.getElementById('app').innerHTML = htmlSoNaLoja(); return; }
   if(state.screen === 'list' && (!active() || active().deleted)){ state.screen = 'home'; state.activeId = null; }
   const app = document.getElementById('app');
   if(state.screen === 'home') app.innerHTML = renderHome();
@@ -2518,8 +2551,9 @@ function bottomNav(activeTab){
     <div class="bottomnav"><div class="bottomnav-inner">
       <button class="nav-btn ${activeTab==='home'?'active':''}" data-act="nav-home"><span class="nav-icon">🛒</span>Listas</button>
       <button class="nav-btn ${activeTab==='recipes'?'active':''}" data-act="nav-recipes"><span class="nav-icon">🍲</span>Receitas</button>
-      <button class="nav-btn ${activeTab==='menu'?'active':''}" data-act="nav-menu"><span class="nav-icon">📅</span>Cardápio</button>
-      <button class="nav-btn ${activeTab==='summary'?'active':''}" data-act="nav-summary"><span class="nav-icon">📊</span>Resumo</button>
+      <button class="nav-btn ${activeTab==='menu'?'active':''}" data-act="nav-menu"><span class="nav-icon">📅${temPlano('cardapio') ? '' : '<i class="nav-lock">🔒</i>'}</span>Cardápio</button>
+      <button class="nav-btn ${activeTab==='summary'?'active':''}" data-act="nav-summary"><span class="nav-icon">📊${temPlano('economia') ? '' : '<i class="nav-lock">🔒</i>'}</span>Resumo</button>
+      <button class="nav-btn" data-act="nav-conta"><span class="nav-icon">${conta.planos.size ? '⭐' : '👤'}</span>Conta</button>
     </div></div>`;
 }
 
@@ -2563,8 +2597,8 @@ function renderHome(){
   return `
     <div class="header">
       ${syncBadgeHtml()}
-      <p class="eyebrow">Olá,</p>
-      <h1 class="h1">Carol</h1>
+      <p class="eyebrow">${nomeUsuario() ? 'Olá,' : 'Bem-vindo(a)'}</p>
+      <h1 class="h1">${esc(nomeUsuario() || 'Lista de Compras')}</h1>
       <p class="sub">Suas compras, sempre no controle</p>
     </div>
     <div class="section overlap"><button class="cta" data-act="new-list">+ Nova lista de compras</button>
@@ -2905,7 +2939,7 @@ function finishList(){
   l.status = 'done'; touch(l);
   state.screen = 'home'; state.activeId = null; render(); window.scrollTo(0,0);
   if(left) toast(`${left} ${left>1?'itens ficaram':'item ficou'} de fora da compra`, null, null, 3500);
-  openPaySheet(l.id);
+  if(temPlano('economia')) openPaySheet(l.id);
 }
 
 /* =========================================================
@@ -3431,9 +3465,9 @@ document.addEventListener('click', e => {
 
   switch(act){
     case 'nav-home': state.screen = 'home'; render(); window.scrollTo(0,0); break;
-    case 'nav-summary': state.screen = 'summary'; render(); window.scrollTo(0,0); break;
+    case 'nav-summary': if(!liberado('economia')) break; state.screen = 'summary'; render(); window.scrollTo(0,0); break;
     case 'nav-recipes': state.screen = 'recipes'; render(); window.scrollTo(0,0); break;
-    case 'nav-menu': state.screen = 'menu'; render(); window.scrollTo(0,0); ensureTaco().then(() => { if(state.screen === 'menu') safeRender(); }).catch(() => {}); break;
+    case 'nav-menu': if(!liberado('cardapio')) break; state.screen = 'menu'; render(); window.scrollTo(0,0); ensureTaco().then(() => { if(state.screen === 'menu') safeRender(); }).catch(() => {}); break;
     case 'menu-view': state.menuView = val; render(); break;
     case 'menu-prev': case 'menu-next': {
       const dir = act === 'menu-next' ? 1 : -1;
@@ -3480,7 +3514,7 @@ document.addEventListener('click', e => {
     case 'week-to-list': openToListSheet({ kind: 'week', start: weekStartOf(state.menuDate) }); break;
     case 'new-recipe': newRecipe(); break;
     case 'import-recipe': openRecipeImport(); break;
-    case 'receipt': openReceiptSheet(); break;
+    case 'receipt': if(liberado('economia')) openReceiptSheet(); break;
     case 'rc-photo': document.getElementById('receipt-photo-input').click(); break;
     case 'rc-paste': {
       const ta = document.getElementById('d-rctext');
@@ -3574,7 +3608,7 @@ document.addEventListener('click', e => {
     case 'food-save': saveFoodSheet(); break;
     case 'fl-mode': { const sh = state.sheet; sh.draft.mode = val; const box = document.getElementById('sheet-box'), top = box.scrollTop; renderFoodSheet(val === 'por' ? '#d-fporG' : null); box.scrollTop = top; break; }
     case 'fl-more': { const sh = state.sheet; sh.draft.more = !sh.draft.more; const box = document.getElementById('sheet-box'), top = box.scrollTop; renderFoodSheet(sh.draft.more ? '#d-fp' : null); box.scrollTop = top; break; }
-    case 'fl-photo': document.getElementById('label-photo-input').click(); break;
+    case 'fl-photo': if(!temPlano('completo')){ abrirPlanos('completo'); break; } document.getElementById('label-photo-input').click(); break;
     case 'recipe-to-list': openToListSheet({ kind: 'recipe', id: state.recipeId }); break;
     case 'times-inc': case 'times-dec': {
       let t = parseNum(d.times) || 1; t = act === 'times-inc' ? t + 1 : Math.max(1, t - 1);
@@ -3795,8 +3829,7 @@ document.addEventListener('visibilitychange', () => { if(document.visibilityStat
 window.addEventListener('online', syncNow);
 window.addEventListener('offline', () => setSync('off'));
 
-render();
-syncNow();
+iniciarConta();
 
 if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
