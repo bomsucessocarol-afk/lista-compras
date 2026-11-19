@@ -118,9 +118,17 @@
   .quick-row{display:flex;gap:8px;}
   .quick-input{flex:1;min-width:0;font-size:16px;border-radius:12px;padding:13px 14px;background:var(--bg);border:2px solid transparent;color:var(--ink);outline:none;}
   .quick-input:focus{border-color:var(--lightblue);background:#fff;}
+  .quick-mic{width:46px;border-radius:12px;background:#EEF3FB;font-size:20px;flex-shrink:0;}
+  .quick-mic.on{background:#E53935;color:#fff;animation:micpulse 1.1s ease-in-out infinite;}
+  @keyframes micpulse{0%,100%{box-shadow:0 0 0 0 rgba(229,57,53,.45);}50%{box-shadow:0 0 0 8px rgba(229,57,53,0);}}
+  .voice-live{margin-top:8px;font-size:13px;font-weight:600;color:#B3261E;}
+  .chips.chips-scroll{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;margin-right:-14px;padding-right:14px;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+  .chips-scroll::-webkit-scrollbar{display:none;}
+  .chips.chips-scroll .chip{flex-shrink:0;}
+  .hint.muted{color:var(--gray);font-weight:600;}
   .quick-add{width:50px;border-radius:12px;background:var(--navy);color:#fff;font-size:26px;font-weight:700;flex-shrink:0;}
   .quick-tools{display:flex;gap:8px;margin-top:8px;}
-  .quick-tools button{flex:1;padding:10px 6px;border-radius:12px;background:#EEF3FB;font-size:13px;font-weight:700;color:var(--navy);}
+  .quick-tools button{flex:1;padding:8px 4px;border-radius:10px;background:transparent;border:1.5px solid #E3E8F3;font-size:12px;font-weight:700;color:var(--navy);}
   .sugg-title{font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 6px;}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
   .sugg-title + .chips{margin-top:0;}
@@ -201,6 +209,10 @@
   .cat-grid .chip{border-radius:12px;padding:9px 4px;font-size:12px;text-align:center;}
   .prio-row{display:flex;gap:6px;}
   .prio-row .chip{flex:1;border-radius:12px;text-align:center;}
+  .crop-box{position:relative;margin:6px 0 4px;border-radius:14px;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;background:#000;}
+  .crop-box img{display:block;width:100%;max-height:52vh;object-fit:contain;pointer-events:none;}
+  .crop-rect{position:absolute;border:3px solid var(--yellow);border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none;}
+  .cta:disabled{opacity:.45;}
   .ocr-box{background:#EEF3FB;border-radius:14px;padding:10px 12px 12px;margin-bottom:6px;}
   .ocr-box .form-label{margin-top:4px;}
   .ocr-box p{margin:0;font-size:12px;color:var(--navy-2);}
@@ -375,6 +387,7 @@
 <div id="toast" class="toast" role="status"></div>
 <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
 <input type="file" id="gallery-input" accept="image/*" hidden />
+<input type="file" id="barcode-input" accept="image/*" capture="environment" hidden />
 <input type="file" id="recipe-photo-input" accept="image/*" hidden />
 <input type="file" id="receipt-photo-input" accept="image/*" hidden />
 <input type="file" id="label-photo-input" accept="image/*" hidden />
@@ -495,8 +508,36 @@ function mapUnit(u){
   if(u==='dz'||u.startsWith('duzia')) return 'dz';
   return 'un';
 }
+/* "dois quilos de frango" → "2 kg frango"; "meia dúzia de ovos" → "0,5 dz ovos" */
+const SPOKEN_NUM = { um:1, uma:1, dois:2, duas:2, tres:3, quatro:4, cinco:5, seis:6, sete:7, oito:8, nove:9, dez:10, onze:11, doze:12, quinze:15, vinte:20, meio:0.5, meia:0.5 };
+const SPOKEN_UNIT = [[/^(quilos?|kilos?|kgs?)$/, 'kg'], [/^(gramas?|grs?)$/, 'g'], [/^(litros?|lts?)$/, 'L'], [/^(mls?|mililitros?)$/, 'ml'],
+  [/^(pacotes?|pacotinhos?|pcts?)$/, 'pct'], [/^(caixas?|caixinhas?|cxs?)$/, 'cx'], [/^(duzias?|dzs?)$/, 'dz'], [/^(unidades?|un|unds?)$/, 'un'],
+  [/^(latas?|garrafas?|potes?|vidros?|sacos?|bandejas?|fardos?)$/, 'un']];
+function normalizeSpoken(text){
+  const t = String(text || '').trim();
+  const words = t.split(/\s+/); if(words.length < 2) return t;
+  const n0 = norm(words[0]);
+  let qty = null, i = 0;
+  if(/^\d+([.,]\d+)?$/.test(words[0])){ qty = parseNum(words[0]); i = 1; }
+  else if(SPOKEN_NUM[n0] !== undefined){ qty = SPOKEN_NUM[n0]; i = 1; }
+  if(qty === null) return t;
+  let unit = null;
+  const nu = norm(words[i] || '');
+  for(const [re, u] of SPOKEN_UNIT){ if(re.test(nu)){ unit = u; i++; break; } }
+  if(!unit && (n0 === 'meio' || n0 === 'meia')) return t;          // "meia" sozinha não é quantidade
+  if(norm(words[i] || '') === 'de' || norm(words[i] || '') === 'do' || norm(words[i] || '') === 'da') i++;
+  const name = words.slice(i).join(' ').trim();
+  if(!name) return t;
+  return `${String(qty).replace('.', ',')}${unit ? ' ' + unit : ''} ${name}`;
+}
+/* "arroz, feijão, 2 kg frango" → 3 itens; na voz também separa por " e " */
+function splitItems(text, spoken){
+  let t = String(text || '').replace(/\s+(mais|tambem|também)\s+/gi, ', ');
+  if(spoken) t = t.replace(/\s+e\s+(?=(\d|um |uma |dois |duas |tres |três |quatro |cinco |seis |meia |meio |[a-zà-ÿ]{3,}))/gi, ', ');
+  return t.split(/[,;\n]+/).map(x => x.trim().replace(/^e\s+/i, '')).filter(x => x.length > 1);
+}
 function parseQuick(text){
-  const t = String(text||'').trim();
+  const t = normalizeSpoken(String(text||'').trim());
   let m = t.match(new RegExp('^(\\d+(?:[.,]\\d+)?)\\s*'+UNIT_RE+'?\\s+(.+)$','i'));
   if(m) return { qty: parseNum(m[1]), unit: mapUnit(m[2]), name: m[3].replace(/^de\s+/i,'').trim() };
   m = t.match(new RegExp('^(.+?)\\s+(\\d+(?:[.,]\\d+)?)\\s*'+UNIT_RE+'?$','i'));
@@ -2594,21 +2635,23 @@ function renderList(){
     </div>
     <div class="section overlap" id="stats-box"></div>
     ${l.status !== 'open' ? `<div class="section"><div class="done-banner">✅ Compra concluída <button data-act="reopen">Reabrir</button></div></div>` : ''}
-    <div class="section">
+    <div class="section quick-sec">
       <div class="card">
         <div class="quick-row">
-          <input id="quick-input" class="quick-input" placeholder="Adicionar item (ex: 2 kg frango)" autocomplete="off" autocapitalize="sentences" enterkeyhint="enter" value="${esc(state.quick)}" />
+          <input id="quick-input" class="quick-input" placeholder="Ex: arroz, feijão, 2 kg frango" autocomplete="off" autocapitalize="sentences" enterkeyhint="enter" value="${esc(state.quick)}" />
+          ${voiceSupported() ? `<button class="quick-mic keep-focus ${voice.on ? 'on' : ''}" data-act="voice" aria-label="Falar os itens">🎤</button>` : ''}
           <button class="quick-add keep-focus" data-act="quick-add" aria-label="Adicionar">+</button>
         </div>
         <div class="quick-tools">
-          <button data-act="import">📋 Lista do papel</button>
           <button data-act="photo">📷 Foto</button>
-          <button data-act="new-detailed">📝 Detalhes</button>
+          <button data-act="import">📋 Colar lista</button>
+          <button data-act="new-detailed">📝 Detalhado</button>
         </div>
+        <div id="voice-live" class="voice-live" ${voice.on ? '' : 'hidden'}>🎤 Pode falar… ex: "dois quilos de frango, arroz e leite"</div>
         <div id="sugg-box"></div>
       </div>
     </div>
-    ${l.items.length ? `<div class="section"><div class="search-box">
+    ${l.items.length > 12 || state.listSearch ? `<div class="section"><div class="search-box">
       <span>🔎</span><input id="list-search" placeholder="Procurar nesta lista (ex: queijo)" autocomplete="off" value="${esc(state.listSearch)}" />
       <button data-act="list-search-clear" class="${state.listSearch ? '' : 'hide'}" aria-label="Limpar busca">✕</button>
     </div></div>` : ''}
@@ -2625,14 +2668,14 @@ function renderStats(){
   box.innerHTML = `
     <div class="card">
       <div class="stats-grid">
-        <div><p class="stat-label">Total estimado</p><p class="stat-big">${brl(est)}</p></div>
+        <div><p class="stat-label">Total da lista</p><p class="stat-big">${brl(est)}</p></div>
         <div><p class="stat-label">No carrinho 🛒</p><p class="stat-big">${brl(cart)}</p></div>
       </div>
       <div class="progress-line"><div class="bar-track"><div class="bar-fill" style="width:${n ? b/n*100 : 0}%"></div></div><span>${b} de ${n}</span></div>
       ${meta > 0
         ? `<div class="meta-line ${over?'over':''}">🎯 Meta ${brl(meta)} · ${over ? 'passou '+brl(est-meta) : 'sobram '+brl(meta-est)}</div>`
         : `<button class="link-btn" data-act="list-settings">🎯 Definir meta de gasto</button>`}
-      ${unpriced ? `<div class="hint">💡 ${unpriced} ${unpriced>1?'itens sem preço — não entram':'item sem preço — não entra'} no total</div>` : ''}
+      ${unpriced ? `<div class="hint muted">${unpriced} ${unpriced>1?'itens sem preço':'item sem preço'} (fora do total)</div>` : ''}
       ${l.discount ? `<div class="meta-line">🎁 Desconto ${brl(l.discount)} · <b>pago ${brl(listSpent(l))}</b></div>` : ''}
       ${l.discountSpread ? `<div class="meta-line">🎁 Desconto de ${brl(l.discountSpread)} já dividido nos preços</div>` : ''}
       ${l.payments.length ? `<button class="link-btn" data-act="list-settings" style="display:block;text-decoration:none">${esc(payTags(l))} ✏️</button>` : (l.status === 'done' ? `<button class="link-btn" data-act="list-settings" style="display:block">💳 Informar como pagou</button>` : '')}
@@ -2644,17 +2687,17 @@ function renderSugg(){
   if(!box || !l) return;
   const hist = buildHistory();
   const inList = new Set(l.items.filter(i=>!i.bought).map(i => norm(i.name)));
-  const q = norm(parseQuick(state.quick).name);
+  const q = norm(parseQuick(lastPart(state.quick)).name);
   let items, title = '';
   if(q){
     items = [...hist.values()].filter(h => h.key.includes(q) && !inList.has(h.key))
       .sort((a,b) => (b.key.startsWith(q) - a.key.startsWith(q)) || b.count - a.count).slice(0, 6);
   }else{
-    items = [...hist.values()].filter(h => !inList.has(h.key)).sort((a,b) => b.count - a.count).slice(0, 10);
-    title = 'Toque pra adicionar · você costuma comprar';
+    items = [...hist.values()].filter(h => !inList.has(h.key)).sort((a,b) => b.count - a.count).slice(0, 15);
+    title = 'Você costuma comprar · toque pra pôr na lista';
   }
   if(!items.length){ box.innerHTML = ''; return; }
-  box.innerHTML = `${title ? `<p class="sugg-title">${title}</p>` : ''}<div class="chips">${items.map(h =>
+  box.innerHTML = `${title ? `<p class="sugg-title">${title}</p>` : ''}<div class="chips ${q ? '' : 'chips-scroll'}">${items.map(h =>
     `<button class="chip keep-focus" data-act="sugg" data-key="${esc(h.key)}">+ ${esc(h.name)}${h.unitPrice !== null ? ` <small>${brl(h.unitPrice)}</small>` : ''}</button>`).join('')}</div>`;
 }
 
@@ -2866,23 +2909,73 @@ function addItemToList(l, item, quiet){
   touch(l); refreshListParts();
   if(!quiet) toast(`"${item.name}" adicionado`, 'Desfazer', () => removeItem(item.id, true), 3000);
 }
+function addParts(parts){
+  const l = active(); if(!l || !parts.length) return 0;
+  if(parts.length === 1){
+    const p = parseQuick(parts[0]); if(!p.name) return 0;
+    addItemToActive(buildItemFromName(p.name, p.qty, p.unit)); return 1;
+  }
+  const before = JSON.parse(JSON.stringify(l.items)), beforeStatus = l.status;
+  let n = 0;
+  parts.forEach(t => { const p = parseQuick(t); if(p.name){ addItemToActive(buildItemFromName(p.name, p.qty, p.unit), true); n++; } });
+  hideToast();
+  if(n) toast(`${n} itens adicionados ✅`, 'Desfazer', () => { l.items = before; l.status = beforeStatus; touch(l); refreshListParts(); }, 6000);
+  return n;
+}
 function addQuick(){
   const raw = state.quick.trim(); if(!raw) return;
-  const p = parseQuick(raw); if(!p.name) return;
-  addItemToActive(buildItemFromName(p.name, p.qty, p.unit));
+  if(!addParts(splitItems(raw, false))) return;
   state.quick = '';
   const inp = document.getElementById('quick-input');
   if(inp){ inp.value = ''; inp.focus(); }
   renderSugg();
 }
+/* ---------- falar os itens (reconhecimento de voz do próprio celular, grátis) ---------- */
+const voice = { on: false, rec: null, text: '' };
+function voiceSupported(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
+function setVoiceUi(){
+  const b = document.querySelector('[data-act="voice"]'); if(b) b.classList.toggle('on', voice.on);
+  const live = document.getElementById('voice-live'); if(live) live.hidden = !voice.on;
+}
+function toggleVoice(){
+  if(voice.on){ try{ voice.rec.stop(); }catch(e){} return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if(!SR) return;
+  const rec = new SR();
+  rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+  voice.rec = rec; voice.text = ''; voice.on = true; setVoiceUi();
+  if(navigator.vibrate) try{ navigator.vibrate(20); }catch(_){}
+  rec.onresult = ev => {
+    let txt = '';
+    for(let i = 0; i < ev.results.length; i++) txt += ev.results[i][0].transcript + ' ';
+    voice.text = txt.trim();
+    const live = document.getElementById('voice-live'); if(live) live.textContent = '🎤 ' + voice.text;
+  };
+  rec.onerror = ev => {
+    voice.on = false; setVoiceUi();
+    if(ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast('Libere o microfone para o app nas configurações do celular', null, null, 4500);
+    else if(ev.error === 'no-speech') toast('Não ouvi nada. Toque no 🎤 e fale de novo.', null, null, 3000);
+    else if(ev.error === 'network') toast('A voz precisa de internet', null, null, 3000);
+  };
+  rec.onend = () => {
+    voice.on = false; setVoiceUi();
+    const live = document.getElementById('voice-live'); if(live) live.textContent = '🎤 Pode falar…';
+    const t = voice.text.trim(); voice.text = '';
+    if(!t) return;
+    const n = addParts(splitItems(t, true));
+    if(n === 0) toast('Não entendi. Tente: "dois quilos de frango"', null, null, 3000);
+  };
+  try{ rec.start(); }catch(e){ voice.on = false; setVoiceUi(); }
+}
+function lastPart(t){ const i = String(t || '').search(/[,;][^,;]*$/); return i >= 0 ? t.slice(i + 1) : String(t || ''); }
 function addFromHistory(key){
   const h = buildHistory().get(key); if(!h) return;
-  const p = parseQuick(state.quick);
+  const p = parseQuick(lastPart(state.quick));
   const item = buildItemFromName(h.name, p.qty, p.unit);
   addItemToActive(item);
   if(state.quick){
-    state.quick = '';
-    const inp = document.getElementById('quick-input'); if(inp){ inp.value = ''; inp.focus(); }
+    const i = state.quick.search(/[,;][^,;]*$/);
+    state.quick = i >= 0 ? state.quick.slice(0, i + 1) + ' ' : '';
+    const inp = document.getElementById('quick-input'); if(inp){ inp.value = state.quick; inp.focus(); }
     renderSugg();
   }
 }
@@ -2935,7 +3028,7 @@ function openItemSheet(id, preset, ocr){
   const it = id ? l.items.find(i => i.id === id) : null;
   const base = it || preset || { name:'', category:'mercearia', qty:1, unit:'un', unitPrice:null, priority:'normal' };
   const d = { brand: base.brand || '', pack: base.pack || '', name: base.name || '', qty: numToInput(base.qty || 1), unit: base.unit || 'un', price: numToInput(base.unitPrice), category: base.category || 'mercearia', priority: base.priority || 'normal' };
-  state.sheet = { type:'item', id: it ? it.id : null, draft: d };
+  state.sheet = { type:'item', id: it ? it.id : null, draft: d, ean: (!it && preset && preset.ean) || null };
 
   const ocrHtml = ocr ? `
     <div class="ocr-box">
@@ -2991,6 +3084,7 @@ function saveItemSheet(){
   if(!name){ const f = document.getElementById('d-name'); if(f){ f.focus(); f.style.borderColor = '#E74C3C'; } return; }
   const qty = parseNum(d.qty), price = parseNum(d.price);
   const data = { brand: d.brand.trim(), pack: d.pack.trim(), name: cap(name), qty: qty > 0 ? round3(qty) : 1, unit: d.unit, unitPrice: price === null ? null : round2(price), category: d.category, priority: d.priority };
+  if(s.ean) eanRemember(s.ean, data);
   if(s.id){
     const it = l.items.find(i => i.id === s.id);
     if(it){ Object.assign(it, data); touch(l); refreshListParts(); }
@@ -3245,8 +3339,21 @@ function productsFromWords(words, imgW, knownBrands){
     const m = w.t.match(PRICE_WORD); if(!m) return;
     const v = parseFloat(m[1]+'.'+m[2]); if(!(v > 0 && v < 10000)) return;
     const next = good[i+1];
-    const perKg = /\/\s*(kg|l)\b/i.test(w.t) || (next && /^\/?\s*(kg|l)\b/i.test(next.t) && Math.abs(next.b.y0 - w.b.y0) < 30);
-    anchors.push({ v, perKg, b: w.b, cx: (w.b.x0+w.b.x1)/2 });
+    // "Preço por kg R$ 5,58", "R$/kg", "valor do litro": é o preço por quilo, não o preço do produto
+    const h = w.b.y1 - w.b.y0;
+    const before = good.slice(Math.max(0, i-5), i).filter(o => {
+      const oh = o.b.y1 - o.b.y0;
+      return Math.abs((o.b.y0+o.b.y1)/2 - (w.b.y0+w.b.y1)/2) < Math.min(h, oh) * 0.7 && o.b.x1 <= w.b.x0 + 5 && w.b.x0 - o.b.x1 < Math.max(h, oh) * 8;
+    }).map(o => norm(o.t)).join(' ');
+    const perKg = /\/\s*(kg|l)\b/i.test(w.t) || (next && /^\/?\s*(kg|l)\b/i.test(next.t) && Math.abs(next.b.y0 - w.b.y0) < 30)
+      || /(por|p\/|\/)\s*(kg|quilo|litro|l|100\s*g|100\s*ml)\b|unidade de medida|preco (do|por) (kg|quilo|litro)/.test(before);
+    anchors.push({ v, perKg, b: w.b, h, cx: (w.b.x0+w.b.x1)/2 });
+  });
+  // preço com letra bem menor perto de um preço grande = preço por kg/unidade (etiqueta de prateleira)
+  anchors.forEach(a => {
+    if(a.perKg) return;
+    const big = anchors.find(o => o !== a && !o.perKg && o.h > a.h * 2.2 && Math.abs(o.cx - a.cx) < (imgW || 1e9) * 0.6 && Math.abs(o.b.y0 - a.b.y0) < o.h * 4);
+    if(big) a.perKg = true;
   });
   const mains = anchors.filter(a => !a.perKg);
   if(!mains.length) return [];
@@ -3290,10 +3397,11 @@ function knownBrandsFromHistory(){ return [...new Set(liveLists().flatMap(l => l
 function openPhotoChooser(){
   state.sheet = { type:'chooser', draft:{} };
   openSheetHtml(`
-    <p class="overlay-title">📷 Foto do produto</p>
-    <p class="overlay-sub">Etiqueta da prateleira, panfleto ou print do site do mercado. Eu leio nome, marca, peso e preço — grátis, no seu celular.</p>
-    <button class="modal-btn" data-act="photo-camera"><b>📸 Tirar foto agora</b><span>Abre a câmera</span></button>
-    <button class="modal-btn" data-act="photo-gallery"><b>🖼️ Escolher da galeria</b><span>Fotos ou prints que você já tem</span></button>
+    <p class="overlay-title">📷 Adicionar por foto</p>
+    <p class="overlay-sub">Grátis, direto no seu celular.</p>
+    <button class="modal-btn" data-act="photo-barcode"><b>📦 Código de barras do produto</b><span>O jeito mais certo: acha nome, marca e peso sozinho</span></button>
+    <button class="modal-btn" data-act="photo-camera"><b>🏷️ Etiqueta da prateleira ou panfleto</b><span>Tira a foto e você marca a parte do nome e do preço</span></button>
+    <button class="modal-btn" data-act="photo-gallery"><b>🖼️ Print ou foto da galeria</b><span>Site do mercado, encarte, WhatsApp</span></button>
     <button class="ghost-btn" data-act="sheet-close">Cancelar</button>`);
 }
 function openMultiSheet(items){
@@ -3325,27 +3433,163 @@ function addMultiProducts(){
   hideToast();
   toast(`${chosen.length} ${chosen.length>1?'produtos adicionados':'produto adicionado'} ✅`, 'Desfazer', () => { l.items = before; l.status = beforeStatus; touch(l); refreshListParts(); }, 6000);
 }
+/* ---------- código de barras → nome, marca e peso (Open Food Facts, grátis) ---------- */
+const LS_EAN = 'carol_ean_v1';
+function eanCache(){ try{ return JSON.parse(localStorage.getItem(LS_EAN) || '{}') || {}; }catch(e){ return {}; } }
+function eanRemember(code, it){
+  if(!code || !it || !it.name) return;
+  const c = eanCache();
+  c[code] = { name: it.name, brand: it.brand || '', pack: it.pack || '', category: it.category || '' };
+  try{ localStorage.setItem(LS_EAN, JSON.stringify(c)); }catch(e){}
+}
+function loadZxing(){
+  return new Promise((res, rej) => {
+    if(window.ZXing) return res();
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+    s.onload = () => res(); s.onerror = () => rej(new Error('load'));
+    document.head.appendChild(s);
+  });
+}
+async function findBarcode(src, quick){
+  // 1) leitor do próprio celular (Android/Chrome)
+  if('BarcodeDetector' in window){
+    try{
+      const det = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128'] });
+      const r = await det.detect(src); if(r && r.length) return r[0].rawValue;
+    }catch(e){}
+  }
+  if(quick) return null;
+  // 2) leitor ZXing (iPhone e outros)
+  await loadZxing();
+  const Z = window.ZXing;
+  const hints = new Map();
+  hints.set(Z.DecodeHintType.TRY_HARDER, true);
+  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E, Z.BarcodeFormat.CODE_128]);
+  const big = Math.max(src.width, src.height);
+  for(const [maxSide, rot] of [[1400, 0], [900, 0], [1400, 90]]){
+    const sc = Math.min(1, maxSide / big);
+    const w = Math.round(src.width * sc), h = Math.round(src.height * sc);
+    const c = document.createElement('canvas');
+    c.width = rot ? h : w; c.height = rot ? w : h;
+    const ctx = c.getContext('2d');
+    if(rot){ ctx.translate(h, 0); ctx.rotate(Math.PI / 2); }
+    ctx.drawImage(src, 0, 0, w, h);
+    try{
+      const reader = new Z.MultiFormatReader(); reader.setHints(hints);
+      const bin = new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(c)));
+      return reader.decode(bin).getText();
+    }catch(e){}
+  }
+  return null;
+}
+function packFromQuantity(q){
+  const m = String(q || '').replace(',', '.').match(/(\d+(?:\.\d+)?)\s*(kg|g|gr|ml|l|lt|litros?)\b/i);
+  if(!m) return '';
+  const u = m[2].toLowerCase(), unit = u === 'gr' ? 'g' : /^l/.test(u) ? 'L' : u;
+  return `${m[1].replace('.', ',')} ${unit}`;
+}
+async function lookupBarcode(code){
+  const mine = eanCache()[code]; if(mine) return mine;
+  const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_pt,generic_name_pt,brands,quantity`);
+  if(!r.ok) return null;
+  const j = await r.json(); const p = j && j.status === 1 && j.product; if(!p) return null;
+  let name = String(p.product_name_pt || p.product_name || p.generic_name_pt || '').trim();
+  if(!name) return null;
+  const brand = String(p.brands || '').split(',')[0].trim();
+  const pack = packFromQuantity(p.quantity) || packFromQuantity(name);
+  if(brand) name = name.replace(new RegExp('\\b' + brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i'), ' ');
+  name = name.replace(/\b\d+(?:[.,]\d+)?\s*(kg|g|gr|ml|l|lt)\b/ig, ' ').replace(/\s+/g, ' ').replace(/^[\s\-–,]+|[\s\-–,]+$/g, '').trim();
+  return { name: cap(name.toLowerCase()), brand: brand ? brand.replace(/\b\w/g, c => c.toUpperCase()) : '', pack, category: '' };
+}
+function itemFromBarcode(code, info){
+  const h = buildHistory().get(norm(info.name));
+  return { name: h ? h.name : info.name, brand: info.brand || (h ? h.brand || '' : ''), pack: info.pack || (h ? h.pack || '' : ''),
+    qty: 1, unit: 'un', unitPrice: h ? h.unitPrice : null, category: info.category || (h ? h.category : guessCategory(info.name)),
+    priority: h ? (h.priority || 'normal') : 'normal', ean: code };
+}
+async function barcodeFromSource(src, quick){
+  const code = await findBarcode(src, quick);
+  if(!code) return false;
+  toast(`📦 Código ${code} · procurando o produto…`, null, null, 20000);
+  let info = null;
+  try{ info = await lookupBarcode(code); }catch(e){ console.warn(e); }
+  hideToast();
+  if(info){ openItemSheet(null, itemFromBarcode(code, info)); toast('✅ Achei pelo código de barras. Confira e salve.', null, null, 3000); }
+  else { openItemSheet(null, { name: '', brand: '', pack: '', qty: 1, unit: 'un', unitPrice: null, category: 'mercearia', priority: 'normal', ean: code }); toast('Produto novo: digite o nome uma vez e eu guardo para a próxima.', null, null, 4500); }
+  return true;
+}
+async function barcodePhoto(file){
+  toast('🔎 Procurando o código de barras…', null, null, 30000);
+  try{
+    const src = await loadBitmap(file);
+    if(await barcodeFromSource(src, false)) return;
+    hideToast();
+    toast('Não achei o código. Chegue mais perto, com o código reto e bem iluminado.', null, null, 4500);
+  }catch(e){ console.warn(e); hideToast(); toast('Não consegui ler agora. Precisa de internet na 1ª vez.', null, null, 4000); }
+}
+
+/* ---------- foto de etiqueta: primeiro você marca a área ---------- */
+async function photoPicked(file){
+  let src;
+  try{ src = await loadBitmap(file); }catch(e){ toast('Não consegui abrir essa foto', null, null, 3000); return; }
+  // tem código de barras na foto? (rápido, só no Android)
+  try{ if(await barcodeFromSource(src, true)) return; }catch(e){}
+  const url = URL.createObjectURL(file);
+  state.sheet = { type: 'crop', src, url, rect: null };
+  openSheetHtml(`
+    <p class="overlay-title">Marque a etiqueta</p>
+    <p class="overlay-sub">Arraste o dedo em volta do <b>nome e do preço</b>. Com só essa parte, a leitura fica bem mais certa.</p>
+    <div class="crop-box" id="crop-box"><img src="${url}" alt="" draggable="false" /><div class="crop-rect" id="crop-rect" hidden></div></div>
+    <div class="sheet-actions">
+      <button class="cta" data-act="crop-read" disabled>🔎 Ler a parte marcada</button>
+      <button class="ghost-btn" data-act="crop-all">Ler a foto inteira</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+function cropAndRead(all){
+  const s = state.sheet; if(!s || s.type !== 'crop') return;
+  const { src, rect, url } = s;
+  let out = src;
+  if(!all && rect && rect.w > 0.04 && rect.h > 0.03){
+    const pad = 0.02;
+    const x = Math.max(0, rect.x - pad), y = Math.max(0, rect.y - pad);
+    const w = Math.min(1 - x, rect.w + pad*2), h = Math.min(1 - y, rect.h + pad*2);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(src.width * w)); c.height = Math.max(1, Math.round(src.height * h));
+    c.getContext('2d').drawImage(src, src.width * x, src.height * y, c.width, c.height, 0, 0, c.width, c.height);
+    out = c;
+  }
+  closeSheet();
+  try{ URL.revokeObjectURL(url); }catch(e){}
+  handlePhoto(out);
+}
+
 async function handlePhoto(file){
   toast('🔎 Lendo a foto… (leva uns segundos)', null, null, 90000);
   try{
     await loadTesseract();
-    const src = await loadBitmap(file);
+    const src = (file instanceof HTMLCanvasElement || (window.ImageBitmap && file instanceof ImageBitmap)) ? file : await loadBitmap(file);
     const brands = knownBrandsFromHistory();
     let lastText = '';
-    // 1ª leitura com desfoque leve (bom para foto de tela e foto tremida); 2ª sem desfoque (print e etiqueta nítida)
-    for(const blur of [true, false]){
-      const canvas = await prepImage(src, blur);
-      const res = await Tesseract.recognize(canvas, 'por');
-      const data = (res && res.data) || {};
-      lastText = data.text || lastText;
-      const words = (data.words || []).map(w => ({ t: w.text, c: w.confidence, b: w.bbox }));
-      const items = productsFromWords(words, canvas.width, brands).map(productToItem).filter(Boolean).slice(0, 12);
-      if(items.length){
-        hideToast();
-        if(items.length === 1) openItemSheet(null, items[0]); else openMultiSheet(items);
-        return;
+    // modo "texto espalhado" (11) acha bem mais nome e preço em etiqueta e encarte; depois tenta com desfoque (foto tremida)
+    const worker = await Tesseract.createWorker('por');
+    try{
+      for(const [blur, psm] of [[false, '11'], [true, '3'], [true, '11']]){
+        await worker.setParameters({ tessedit_pageseg_mode: psm });
+        const canvas = await prepImage(src, blur);
+        const res = await worker.recognize(canvas);
+        const data = (res && res.data) || {};
+        lastText = data.text || lastText;
+        const words = (data.words || []).map(w => ({ t: w.text, c: w.confidence, b: w.bbox }));
+        const items = productsFromWords(words, canvas.width, brands).map(productToItem).filter(Boolean).slice(0, 12);
+        if(items.length){
+          hideToast();
+          if(items.length === 1) openItemSheet(null, items[0]); else openMultiSheet(items);
+          return;
+        }
       }
-    }
+    } finally { try{ await worker.terminate(); }catch(e){} }
     // não achou preço junto de nome: mostra o que conseguiu ler pra você escolher
     hideToast();
     const prices = extractPrices(lastText), names = extractNames(lastText);
@@ -3601,10 +3845,14 @@ document.addEventListener('click', e => {
     case 'calc': document.getElementById('calc-overlay').classList.add('show'); break;
     case 'close-overlays': closeOverlays(); break;
     case 'quick-add': addQuick(); break;
+    case 'voice': toggleVoice(); break;
     case 'sugg': addFromHistory(el.dataset.key); break;
     case 'photo': openPhotoChooser(); break;
     case 'photo-camera': closeSheet(); document.getElementById('photo-input').click(); break;
     case 'photo-gallery': closeSheet(); document.getElementById('gallery-input').click(); break;
+    case 'photo-barcode': closeSheet(); document.getElementById('barcode-input').click(); break;
+    case 'crop-read': cropAndRead(false); break;
+    case 'crop-all': cropAndRead(true); break;
     case 'multi-toggle': {
       const i = Number(el.dataset.idx), off = state.sheet.off;
       off.has(i) ? off.delete(i) : off.add(i);
@@ -3753,8 +4001,33 @@ document.getElementById('recipe-photo-input').addEventListener('change', e => {
 ['photo-input','gallery-input'].forEach(id => document.getElementById(id).addEventListener('change', e => {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
-  if(file) handlePhoto(file);
+  if(file) photoPicked(file);
 }));
+document.getElementById('barcode-input').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if(file) barcodePhoto(file);
+});
+/* arrastar o dedo para marcar a área da etiqueta */
+let cropDrag = null;
+document.addEventListener('pointerdown', e => {
+  const box = e.target.closest('#crop-box'); if(!box || !state.sheet || state.sheet.type !== 'crop') return;
+  e.preventDefault();
+  const r = box.getBoundingClientRect();
+  cropDrag = { r, x0: (e.clientX - r.left) / r.width, y0: (e.clientY - r.top) / r.height, id: e.pointerId };
+  try{ box.setPointerCapture(e.pointerId); }catch(_){}
+});
+document.addEventListener('pointermove', e => {
+  if(!cropDrag || e.pointerId !== cropDrag.id) return;
+  const { r } = cropDrag, cl = v => Math.max(0, Math.min(1, v));
+  const x1 = cl((e.clientX - r.left) / r.width), y1 = cl((e.clientY - r.top) / r.height);
+  const rect = { x: Math.min(cropDrag.x0, x1), y: Math.min(cropDrag.y0, y1), w: Math.abs(x1 - cropDrag.x0), h: Math.abs(y1 - cropDrag.y0) };
+  state.sheet.rect = rect;
+  const el = document.getElementById('crop-rect');
+  if(el){ el.hidden = false; Object.assign(el.style, { left: rect.x*100+'%', top: rect.y*100+'%', width: rect.w*100+'%', height: rect.h*100+'%' }); }
+  const b = document.querySelector('[data-act="crop-read"]'); if(b) b.disabled = !(rect.w > 0.04 && rect.h > 0.03);
+});
+document.addEventListener('pointerup', e => { if(cropDrag && e.pointerId === cropDrag.id) cropDrag = null; });
 
 /* =========================================================
    CALCULADORA (não mexe na lista)
