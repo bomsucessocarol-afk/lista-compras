@@ -2,8 +2,8 @@
    - Página: tenta a internet primeiro (pra pegar atualizações) e usa a cópia guardada se estiver offline.
    - Ícones e bibliotecas: usa a cópia guardada e atualiza em segundo plano.
    - Dados (Supabase): nunca passam pelo cache. */
-const CACHE = 'lista-compras-v13';
-const SHELL = ['./', './index.html', './manifest.json', './taco.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
+const CACHE = 'lista-compras-v14';
+const SHELL = ['./', './index.html', './receitas-prontas.js', './manifest.json', './taco.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

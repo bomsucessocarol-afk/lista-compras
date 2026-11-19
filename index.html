@@ -33,6 +33,7 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="theme-color" content="#383772" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="receitas-prontas.js"></script>
 <style>
   :root{
     --navy:#383772;
@@ -209,6 +210,9 @@
   .cat-grid .chip{border-radius:12px;padding:9px 4px;font-size:12px;text-align:center;}
   .prio-row{display:flex;gap:6px;}
   .prio-row .chip{flex:1;border-radius:12px;text-align:center;}
+  .two-btns{display:flex;gap:8px;}
+  .two-btns .ghost-btn{flex:1;}
+  .white-btn{background:#fff;color:var(--navy);box-shadow:0 2px 10px rgba(27,26,51,.06);}
   .crop-box{position:relative;margin:6px 0 4px;border-radius:14px;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;background:#000;}
   .crop-box img{display:block;width:100%;max-height:52vh;object-fit:contain;pointer-events:none;}
   .crop-rect{position:absolute;border:3px solid var(--yellow);border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none;}
@@ -641,6 +645,7 @@ function normalizeRecipes(raw){
   return (Array.isArray(raw) ? raw : []).filter(r => r && r.id).map(r => ({
     id: String(r.id), name: String(r.name || 'Receita').trim(), portions: Number(r.portions) > 0 ? Number(r.portions) : 1,
     notes: String(r.notes || ''), updatedAt: Number(r.updatedAt) || 0, deleted: !!r.deleted,
+    meal: ['cafe','almoco','lanche'].includes(r.meal) ? r.meal : '',
     ingredients: (Array.isArray(r.ingredients) ? r.ingredients : []).filter(Boolean).map(i => ({
       id: String(i.id || uid('g')), foodId: String(i.foodId || ''), name: String(i.name || 'Ingrediente'), srcName: String(i.srcName || ''),
       qty: Number(i.qty) > 0 ? Number(i.qty) : 0, unit: ING_UNITS[i.unit] ? i.unit : 'g',
@@ -744,10 +749,13 @@ function renderRecipes(){
       <p class="sub">Ingredientes, quantidades e calorias</p>
     </div>
     <div class="section overlap"><button class="cta" data-act="new-recipe">+ Nova receita</button>
-      <button class="ghost-btn" data-act="import-recipe" style="background:#fff;color:var(--navy);box-shadow:0 2px 10px rgba(27,26,51,.06)">📥 Importar de foto, print ou texto</button></div>
+      <div class="two-btns">
+        <button class="ghost-btn white-btn" data-act="ready-recipes">📚 Receitas prontas</button>
+        <button class="ghost-btn white-btn" data-act="import-recipe">📥 Importar</button>
+      </div></div>
     <div class="section">
       ${all.length > 4 ? `<input class="quick-input" id="recipe-search" placeholder="🔎 Buscar receita ou ingrediente" value="${esc(state.recipeSearch)}" style="width:100%;margin-bottom:12px" />` : ''}
-      ${all.length === 0 ? `<div class="empty" style="margin-top:6px">🍲<br/><br/>Nenhuma receita ainda.<br/>Toque em "Nova receita" e adicione os ingredientes —<br/>eu calculo as calorias.</div>` : ''}
+      ${all.length === 0 ? `<div class="empty" style="margin-top:6px">🍲<br/><br/>Nenhuma receita ainda.<br/>Comece pelas <b>receitas prontas</b> (arroz, feijão, frango, omelete…) ou crie a sua: eu calculo as calorias.<br/><br/><button class="cta" data-act="ready-recipes" style="max-width:260px;margin:0 auto">📚 Ver receitas prontas</button></div>` : ''}
       ${all.length ? `<p class="swipe-hint">👈 Arraste uma receita pro lado pra excluir</p>` : ''}
       <div id="recipe-cards">${cards || (all.length ? '<p style="text-align:center;color:var(--gray);font-size:13px">Nada encontrado.</p>' : '')}</div>
     </div>
@@ -1478,7 +1486,8 @@ function renderWeekBody(){
       <h2 class="section-title">Dias da semana <small>${planned.length}/7 planejados</small></h2>
       ${cards}
       <div class="wk-actions">
-        <button class="cta" data-act="week-to-list">🛒 Lista de compras da semana</button>
+        <button class="cta" data-act="auto-week">✨ Montar a semana com minhas receitas</button>
+        <button class="ghost-btn white-btn" data-act="week-to-list">🛒 Lista de compras da semana</button>
         <button class="ghost-btn" data-act="copy-prev-week">📋 Copiar a semana passada</button>
         <button class="ghost-btn" data-act="repeat-month">🔁 Repetir esta semana até o fim do mês</button>
       </div>
@@ -1870,6 +1879,7 @@ function matchFood(name, learned){
     score -= fw.length * 0.25;
     if(/\bcru|crua\b/.test(f.n)) score += 1.5;
     if(/sem pele/.test(f.n)) score += 0.5;
+    if(/\b(integral|light|diet|desnatad)/.test(f.n) && !words.some(w => /integral|light|diet|desnatad/.test(w))) score -= 1.5;
     if(/\b(cozid|frit|assad|grelhad|refogad|ensopad|doce|pudim|mingau|bolo|torta)/.test(f.n) && !words.some(w => /cozid|frit|assad|grelhad|refogad/.test(w))) score -= 2.5;
     score += Math.max(0, 3 - popRank(f.n) * 0.2);
     if(f.mine) score += 2;
@@ -1958,6 +1968,166 @@ async function readRecipeText(){
   state.sheet = { type: 'recreview', draft: { title: p.title, portions: numToInput(p.portions || 1), prep: p.prep }, ings, off: new Set(), text };
   renderRecipeReview();
 }
+/* ---------- receitas prontas ---------- */
+async function openReadyRecipes(){
+  state.sheet = { type: 'ready', list: null, off: new Set() };
+  openSheetHtml(`<p class="overlay-title">📚 Receitas prontas</p><p class="overlay-sub">Carregando a tabela de alimentos…</p>`);
+  try{ await ensureTaco(); }catch(e){ openSheetHtml(`<p class="overlay-title">📚 Receitas prontas</p><p class="overlay-sub">Precisa de internet na primeira vez. Tente de novo.</p><button class="ghost-btn" data-act="sheet-close">Fechar</button>`); return; }
+  if(!state.sheet || state.sheet.type !== 'ready') return;
+  const have = new Set(liveRecipes().map(r => norm(r.name)));
+  const learned = learnedFoods();
+  const list = (typeof RECEITAS_PRONTAS !== 'undefined' ? RECEITAS_PRONTAS : []).map(rp => {
+    const pr = parseRecipeText(rp.texto);
+    const ings = pr.ings.map(i => ({ ...i, food: matchFood(i.name, learned) }));
+    const kcal = ings.reduce((a, i) => a + (i.food ? ingNutri({ ...i, per100: i.food.per100 }).kcal : 0), 0) / (pr.portions || 1);
+    return { meal: rp.meal, title: pr.title, portions: pr.portions || 1, prep: pr.prep, ings, kcal, tem: have.has(norm(pr.title)) };
+  });
+  state.sheet.list = list;
+  list.forEach((r, i) => { if(r.tem) state.sheet.off.add(i); });
+  renderReadyRecipes();
+}
+const MEAL_TAG = { cafe: '☕ Café', almoco: '🍽️ Almoço/jantar', lanche: '🍎 Lanche' };
+function renderReadyRecipes(){
+  const s = state.sheet; if(!s || !s.list) return;
+  const n = s.list.filter((r, i) => !s.off.has(i) && !r.tem).length;
+  const groups = ['almoco', 'cafe', 'lanche'].map(m => {
+    const rows = s.list.map((r, i) => ({ r, i })).filter(x => x.r.meal === m);
+    return `<span class="form-label">${MEAL_TAG[m]}</span>` + rows.map(({ r, i }) => {
+      const on = !s.off.has(i) && !r.tem;
+      return `<div class="item-row" style="border-top:1px solid #F0F1F6">
+        <button class="chk ${on ? 'on' : ''}" data-act="${r.tem ? 'noop' : 'rr-toggle'}" data-idx="${i}" ${r.tem ? 'disabled' : ''}>${on ? '✓' : ''}</button>
+        <div class="item-main" data-act="${r.tem ? 'noop' : 'rr-toggle'}" data-idx="${i}"><div class="item-name">${esc(r.title)}</div>
+          <div class="item-detail">${r.tem ? 'você já tem' : `${r.ings.length} ingredientes · rende ${fmtQty(r.portions)}`}</div></div>
+        <div class="item-sub">${kcalTxt(r.kcal)}<small style="display:block;font-weight:600;color:var(--gray);font-size:11px">por porção</small></div>
+      </div>`;
+    }).join('');
+  }).join('');
+  openSheetHtml(`
+    <p class="overlay-title">📚 Receitas prontas</p>
+    <p class="overlay-sub">Receitas do dia a dia, com as calorias já calculadas. Depois você pode mudar o que quiser.</p>
+    ${groups}
+    <div class="sheet-actions">
+      <button class="cta" data-act="rr-save" ${n ? '' : 'disabled'}>Adicionar ${n} ${n === 1 ? 'receita' : 'receitas'}</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+function saveReadyRecipes(){
+  const s = state.sheet; if(!s || !s.list) return;
+  const chosen = s.list.filter((r, i) => !s.off.has(i) && !r.tem); if(!chosen.length) return;
+  chosen.forEach(rp => {
+    const ings = rp.ings.map(i => ({ id: uid('g'), foodId: i.food ? i.food.id : '', name: i.food ? i.food.name : i.name, srcName: i.name,
+      qty: i.qty, unit: i.unit, gPerUnit: i.gPerUnit, per100: i.food ? i.food.per100 : per100Of(null) }));
+    const r = { id: uid('r'), name: rp.title, portions: rp.portions, notes: rp.prep || '', meal: rp.meal, updatedAt: 0, deleted: false, ingredients: ings };
+    state.recipes.push(r); touch(r);
+  });
+  closeSheet(); render();
+  toast(`✅ ${chosen.length} ${chosen.length === 1 ? 'receita adicionada' : 'receitas adicionadas'}`, null, null, 3000);
+}
+
+/* ---------- montar a semana sozinho ---------- */
+const MEAL_SHARE = { cafe: 0.25, almoco: 0.35, lanche: 0.10, jantar: 0.30 };
+function openAutoWeek(){
+  if(!liveRecipes().length){
+    toast('Primeiro adicione algumas receitas (tem receitas prontas na aba Receitas)', null, null, 4500); return;
+  }
+  state.sheet = { type: 'autoweek', meals: new Set(['almoco', 'jantar']), onlyEmpty: true };
+  renderAutoWeek();
+}
+function recipesForMeal(meal){
+  const tag = meal === 'jantar' ? 'almoco' : meal;
+  const rs = liveRecipes().filter(r => r.ingredients.length);
+  const tagged = rs.filter(r => r.meal === tag);
+  if(tagged.length) return tagged;
+  return tag === 'almoco' ? rs.filter(r => !r.meal) : [];
+}
+function renderAutoWeek(){
+  const s = state.sheet;
+  const pf = myProfile(), e = calcTDEE(pf);
+  const counts = MEALS.map(m => ({ m, n: recipesForMeal(m.id).length }));
+  openSheetHtml(`
+    <p class="overlay-title">✨ Montar a semana</p>
+    <p class="overlay-sub">Eu distribuo as suas receitas pelos dias da semana, sem repetir a mesma no dia seguinte.${e ? ` As porções seguem a sua meta de <b>${kcalTxt(Math.max(minKcal(pf), e.tdee - (pf.deficit || 0)))}</b> por dia.` : ' Configure o perfil para eu ajustar as porções às suas calorias.'}</p>
+    <span class="form-label">Quais refeições?</span>
+    <div class="chips">${counts.map(({ m, n }) => `<button class="chip ${s.meals.has(m.id) ? 'sel' : ''} ${n ? '' : 'dis'}" data-act="${n ? 'aw-meal' : 'noop'}" data-val="${m.id}">${m.emoji} ${m.label} <small>${n} ${n === 1 ? 'receita' : 'receitas'}</small></button>`).join('')}</div>
+    <button class="chip ${s.onlyEmpty ? 'sel' : ''}" style="margin-top:14px" data-act="aw-only-empty">${s.onlyEmpty ? '✓ ' : ''}Só preencher o que está vazio</button>
+    <div class="sheet-actions">
+      <button class="cta" data-act="aw-go" ${[...s.meals].some(m => recipesForMeal(m).length) ? '' : 'disabled'}>Montar a semana</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+/* tipo de prato, para montar almoço/jantar de verdade (arroz + feijão + mistura + acompanhamento) */
+function dishRole(r){
+  const n = norm(r.name);
+  if(/^arroz\b/.test(n) && !/(carreteiro|galinhada|risoto|doce|com )/.test(n)) return 'arroz';
+  if(/^feijao\b/.test(n) && !/(tropeiro|feijoada)/.test(n)) return 'feijao';
+  if(/^(salada|pure|legumes|farofa|vinagrete|batata frita|batata cozida|mandioca cozida|couve|abobrinha refogada)/.test(n)) return 'acomp';
+  if(/(macarr|sopa|lasanha|pizza|escondidinho|caldo|risoto|galinhada|carreteiro|feijoada|yakisoba|panqueca|sanduiche|wrap)/.test(n)) return 'completo';
+  return 'principal';
+}
+const q4 = v => Math.round(v * 4) / 4;
+function runAutoWeek(){
+  const s = state.sheet;
+  const dates = weekDates(weekStartOf(state.menuDate));
+  const pf = myProfile(), e = calcTDEE(pf);
+  const target = e ? Math.max(minKcal(pf), e.tdee - (pf.deficit || 0)) : null;
+  const before = JSON.parse(JSON.stringify(state.plans));
+  const kc = r => recipeTotals(r).por.kcal || 0;
+  const entry = (r, por) => ({ id: uid('e'), type: 'recipe', refId: r.id, name: r.name, portions: Math.max(0.25, por), kcal: round2(kc(r)) });
+  let n = 0;
+  const used = {};          // id da receita → último dia usado (índice)
+  const pickFrom = (pool, di, avoid) => {
+    const ok = pool.filter(r => !(avoid || []).includes(r.id));
+    const list = (ok.length ? ok : pool).slice().sort((a, b) => ((used[a.id] ?? -9) - (used[b.id] ?? -9)) || (Math.random() - 0.5));
+    const r = list[0]; used[r.id] = di; return r;
+  };
+  let slot = 0;
+  dates.forEach((d, di0) => MEALS.forEach(m => {
+    const di = slot++;
+    if(!s.meals.has(m.id)) return;
+    const pool = recipesForMeal(m.id); if(!pool.length) return;
+    const share = target ? target * MEAL_SHARE[m.id] : null;
+    const by = role => pool.filter(r => dishRole(r) === role);
+    const mains = pool.filter(r => ['principal', 'completo'].includes(dishRole(r)));
+    {
+      const pl = ensurePlan(d), arr = pl.meals[m.id];
+      if(s.onlyEmpty && arr.length) return;
+      if(!s.onlyEmpty) arr.length = 0;
+      const lunch = m.id === 'jantar' ? (pl.meals.almoco || []).map(x => x.refId) : [];
+      const items = [];
+      if((m.id === 'almoco' || m.id === 'jantar') && mains.length){
+        const main = pickFrom(mains, di, lunch);
+        items.push([main, 1]);
+        if(dishRole(main) === 'principal'){
+          const side = by('acomp').length ? pickFrom(by('acomp'), di, lunch) : null;
+          if(side) items.push([side, 1]);
+          const bases = [by('arroz')[0], by('feijao')[0]].filter(Boolean);
+          const fixed = items.reduce((a, [r, p]) => a + kc(r) * p, 0);
+          bases.forEach(b => {
+            let por = 1;
+            if(share && kc(b) > 0) por = Math.min(2, Math.max(0.5, q4(Math.max(0, share - fixed) / bases.length / kc(b))));
+            items.push([b, por]);
+          });
+        } else if(share && kc(main) > 0){
+          items[0][1] = Math.min(2, Math.max(0.5, q4(share / kc(main))));
+        }
+      } else {
+        const r = pickFrom(pool, di, lunch);
+        let por = 1;
+        if(share && kc(r) > 0) por = Math.min(3, Math.max(0.5, Math.round(share / kc(r) * 2) / 2));
+        items.push([r, por]);
+      }
+      items.forEach(([r, por]) => arr.push(entry(r, por)));
+      touch(pl); n++;
+    }
+  }));
+  closeSheet(); render();
+  toast(n ? `✨ ${n} refeições planejadas na semana` : 'A semana já estava preenchida', n ? 'Desfazer' : null, () => {
+    const had = new Set(before.map(p => p.id));
+    const created = state.plans.filter(p => !had.has(p.id)).map(p => ({ ...p, deleted: true }));
+    state.plans = normalizePlans(before).concat(created); state.plans.forEach(p => touch(p)); render();
+  }, 6000);
+}
+
 function renderRecipeReview(){
   const s = state.sheet, d = s.draft;
   const tot = s.ings.reduce((acc, i, idx) => acc + (s.off.has(idx) || !i.food ? 0 : ingNutri({ ...i, per100: i.food.per100 }).kcal), 0);
@@ -3721,6 +3891,13 @@ document.addEventListener('click', e => {
     case 'clear-day': clearDay(); break;
     case 'copy-prev-week': copyPrevWeek(); break;
     case 'repeat-month': repeatWeekToMonthEnd(); break;
+    case 'ready-recipes': openReadyRecipes(); break;
+    case 'rr-toggle': { const i = Number(el.dataset.idx); const sh = state.sheet; if(sh.off.has(i)) sh.off.delete(i); else sh.off.add(i); renderReadyRecipes(); break; }
+    case 'rr-save': saveReadyRecipes(); break;
+    case 'auto-week': openAutoWeek(); break;
+    case 'aw-meal': { const sh = state.sheet; if(sh.meals.has(val)) sh.meals.delete(val); else sh.meals.add(val); renderAutoWeek(); break; }
+    case 'aw-only-empty': state.sheet.onlyEmpty = !state.sheet.onlyEmpty; renderAutoWeek(); break;
+    case 'aw-go': runAutoWeek(); break;
     case 'week-to-list': openToListSheet({ kind: 'week', start: weekStartOf(state.menuDate) }); break;
     case 'new-recipe': newRecipe(); break;
     case 'import-recipe': openRecipeImport(); break;
