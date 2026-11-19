@@ -25,7 +25,7 @@ const PLANOS = [
     itens: ['📅 Cardápio da semana e do mês', '🔥 Calorias e meta do dia', '🛒 Gera a lista de compras pelo cardápio'],
     mensal: { sku: 'cardapio_mensal', preco: 'R$ 4,99' }, vitalicio: { sku: 'cardapio_vitalicio', preco: 'R$ 12,90' } },
   { id: 'completo', nome: 'Completo', emoji: '⭐', cor: '#383772', destaque: true,
-    itens: ['✅ Tudo do Economia + Cardápio', '📷 Leitura de etiqueta por foto', '👨‍👩‍👦 Lista compartilhada com a família (em breve)'],
+    itens: ['✅ Tudo do Economia + Cardápio', '📦 Adicionar pelo código de barras', '📷 Leitura de etiqueta e encarte por foto', '👨‍👩‍👦 Lista compartilhada com a família (em breve)'],
     mensal: { sku: 'completo_mensal', preco: 'R$ 7,99' }, vitalicio: { sku: 'completo_vitalicio', preco: 'R$ 19,90' } },
 ];
 const PLANO_BY = Object.fromEntries(PLANOS.map(p => [p.id, p]));

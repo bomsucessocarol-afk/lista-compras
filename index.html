@@ -34,6 +34,7 @@
 <meta name="theme-color" content="#383772" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="conta.js"></script>
+<script src="receitas-prontas.js"></script>
 <style>
   :root{
     --navy:#383772;
@@ -119,9 +120,17 @@
   .quick-row{display:flex;gap:8px;}
   .quick-input{flex:1;min-width:0;font-size:16px;border-radius:12px;padding:13px 14px;background:var(--bg);border:2px solid transparent;color:var(--ink);outline:none;}
   .quick-input:focus{border-color:var(--lightblue);background:#fff;}
+  .quick-mic{width:46px;border-radius:12px;background:#EEF3FB;font-size:20px;flex-shrink:0;}
+  .quick-mic.on{background:#E53935;color:#fff;animation:micpulse 1.1s ease-in-out infinite;}
+  @keyframes micpulse{0%,100%{box-shadow:0 0 0 0 rgba(229,57,53,.45);}50%{box-shadow:0 0 0 8px rgba(229,57,53,0);}}
+  .voice-live{margin-top:8px;font-size:13px;font-weight:600;color:#B3261E;}
+  .chips.chips-scroll{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;margin-right:-14px;padding-right:14px;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+  .chips-scroll::-webkit-scrollbar{display:none;}
+  .chips.chips-scroll .chip{flex-shrink:0;}
+  .hint.muted{color:var(--gray);font-weight:600;}
   .quick-add{width:50px;border-radius:12px;background:var(--navy);color:#fff;font-size:26px;font-weight:700;flex-shrink:0;}
   .quick-tools{display:flex;gap:8px;margin-top:8px;}
-  .quick-tools button{flex:1;padding:10px 6px;border-radius:12px;background:#EEF3FB;font-size:13px;font-weight:700;color:var(--navy);}
+  .quick-tools button{flex:1;padding:8px 4px;border-radius:10px;background:transparent;border:1.5px solid #E3E8F3;font-size:12px;font-weight:700;color:var(--navy);}
   .sugg-title{font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 6px;}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
   .sugg-title + .chips{margin-top:0;}
@@ -225,6 +234,13 @@
   .cat-grid .chip{border-radius:12px;padding:9px 4px;font-size:12px;text-align:center;}
   .prio-row{display:flex;gap:6px;}
   .prio-row .chip{flex:1;border-radius:12px;text-align:center;}
+  .two-btns{display:flex;gap:8px;}
+  .two-btns .ghost-btn{flex:1;}
+  .white-btn{background:#fff;color:var(--navy);box-shadow:0 2px 10px rgba(27,26,51,.06);}
+  .crop-box{position:relative;margin:6px 0 4px;border-radius:14px;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;background:#000;}
+  .crop-box img{display:block;width:100%;max-height:52vh;object-fit:contain;pointer-events:none;}
+  .crop-rect{position:absolute;border:3px solid var(--yellow);border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none;}
+  .cta:disabled{opacity:.45;}
   .ocr-box{background:#EEF3FB;border-radius:14px;padding:10px 12px 12px;margin-bottom:6px;}
   .ocr-box .form-label{margin-top:4px;}
   .ocr-box p{margin:0;font-size:12px;color:var(--navy-2);}
@@ -399,6 +415,7 @@
 <div id="toast" class="toast" role="status"></div>
 <input type="file" id="photo-input" accept="image/*" capture="environment" hidden />
 <input type="file" id="gallery-input" accept="image/*" hidden />
+<input type="file" id="barcode-input" accept="image/*" capture="environment" hidden />
 <input type="file" id="recipe-photo-input" accept="image/*" hidden />
 <input type="file" id="receipt-photo-input" accept="image/*" hidden />
 <input type="file" id="label-photo-input" accept="image/*" hidden />
@@ -519,8 +536,36 @@ function mapUnit(u){
   if(u==='dz'||u.startsWith('duzia')) return 'dz';
   return 'un';
 }
+/* "dois quilos de frango" → "2 kg frango"; "meia dúzia de ovos" → "0,5 dz ovos" */
+const SPOKEN_NUM = { um:1, uma:1, dois:2, duas:2, tres:3, quatro:4, cinco:5, seis:6, sete:7, oito:8, nove:9, dez:10, onze:11, doze:12, quinze:15, vinte:20, meio:0.5, meia:0.5 };
+const SPOKEN_UNIT = [[/^(quilos?|kilos?|kgs?)$/, 'kg'], [/^(gramas?|grs?)$/, 'g'], [/^(litros?|lts?)$/, 'L'], [/^(mls?|mililitros?)$/, 'ml'],
+  [/^(pacotes?|pacotinhos?|pcts?)$/, 'pct'], [/^(caixas?|caixinhas?|cxs?)$/, 'cx'], [/^(duzias?|dzs?)$/, 'dz'], [/^(unidades?|un|unds?)$/, 'un'],
+  [/^(latas?|garrafas?|potes?|vidros?|sacos?|bandejas?|fardos?)$/, 'un']];
+function normalizeSpoken(text){
+  const t = String(text || '').trim();
+  const words = t.split(/\s+/); if(words.length < 2) return t;
+  const n0 = norm(words[0]);
+  let qty = null, i = 0;
+  if(/^\d+([.,]\d+)?$/.test(words[0])){ qty = parseNum(words[0]); i = 1; }
+  else if(SPOKEN_NUM[n0] !== undefined){ qty = SPOKEN_NUM[n0]; i = 1; }
+  if(qty === null) return t;
+  let unit = null;
+  const nu = norm(words[i] || '');
+  for(const [re, u] of SPOKEN_UNIT){ if(re.test(nu)){ unit = u; i++; break; } }
+  if(!unit && (n0 === 'meio' || n0 === 'meia')) return t;          // "meia" sozinha não é quantidade
+  if(norm(words[i] || '') === 'de' || norm(words[i] || '') === 'do' || norm(words[i] || '') === 'da') i++;
+  const name = words.slice(i).join(' ').trim();
+  if(!name) return t;
+  return `${String(qty).replace('.', ',')}${unit ? ' ' + unit : ''} ${name}`;
+}
+/* "arroz, feijão, 2 kg frango" → 3 itens; na voz também separa por " e " */
+function splitItems(text, spoken){
+  let t = String(text || '').replace(/\s+(mais|tambem|também)\s+/gi, ', ');
+  if(spoken) t = t.replace(/\s+e\s+(?=(\d|um |uma |dois |duas |tres |três |quatro |cinco |seis |meia |meio |[a-zà-ÿ]{3,}))/gi, ', ');
+  return t.split(/[,;\n]+/).map(x => x.trim().replace(/^e\s+/i, '')).filter(x => x.length > 1);
+}
 function parseQuick(text){
-  const t = String(text||'').trim();
+  const t = normalizeSpoken(String(text||'').trim());
   let m = t.match(new RegExp('^(\\d+(?:[.,]\\d+)?)\\s*'+UNIT_RE+'?\\s+(.+)$','i'));
   if(m) return { qty: parseNum(m[1]), unit: mapUnit(m[2]), name: m[3].replace(/^de\s+/i,'').trim() };
   m = t.match(new RegExp('^(.+?)\\s+(\\d+(?:[.,]\\d+)?)\\s*'+UNIT_RE+'?$','i'));
@@ -624,6 +669,7 @@ function normalizeRecipes(raw){
   return (Array.isArray(raw) ? raw : []).filter(r => r && r.id).map(r => ({
     id: String(r.id), name: String(r.name || 'Receita').trim(), portions: Number(r.portions) > 0 ? Number(r.portions) : 1,
     notes: String(r.notes || ''), updatedAt: Number(r.updatedAt) || 0, deleted: !!r.deleted,
+    meal: ['cafe','almoco','lanche'].includes(r.meal) ? r.meal : '',
     ingredients: (Array.isArray(r.ingredients) ? r.ingredients : []).filter(Boolean).map(i => ({
       id: String(i.id || uid('g')), foodId: String(i.foodId || ''), name: String(i.name || 'Ingrediente'), srcName: String(i.srcName || ''),
       qty: Number(i.qty) > 0 ? Number(i.qty) : 0, unit: ING_UNITS[i.unit] ? i.unit : 'g',
@@ -727,10 +773,13 @@ function renderRecipes(){
       <p class="sub">Ingredientes, quantidades e calorias</p>
     </div>
     <div class="section overlap"><button class="cta" data-act="new-recipe">+ Nova receita</button>
-      <button class="ghost-btn" data-act="import-recipe" style="background:#fff;color:var(--navy);box-shadow:0 2px 10px rgba(27,26,51,.06)">📥 Importar de foto, print ou texto</button></div>
+      <div class="two-btns">
+        <button class="ghost-btn white-btn" data-act="ready-recipes">📚 Receitas prontas</button>
+        <button class="ghost-btn white-btn" data-act="import-recipe">📥 Importar</button>
+      </div></div>
     <div class="section">
       ${all.length > 4 ? `<input class="quick-input" id="recipe-search" placeholder="🔎 Buscar receita ou ingrediente" value="${esc(state.recipeSearch)}" style="width:100%;margin-bottom:12px" />` : ''}
-      ${all.length === 0 ? `<div class="empty" style="margin-top:6px">🍲<br/><br/>Nenhuma receita ainda.<br/>Toque em "Nova receita" e adicione os ingredientes —<br/>eu calculo as calorias.</div>` : ''}
+      ${all.length === 0 ? `<div class="empty" style="margin-top:6px">🍲<br/><br/>Nenhuma receita ainda.<br/>Comece pelas <b>receitas prontas</b> (arroz, feijão, frango, omelete…) ou crie a sua: eu calculo as calorias.<br/><br/><button class="cta" data-act="ready-recipes" style="max-width:260px;margin:0 auto">📚 Ver receitas prontas</button></div>` : ''}
       ${all.length ? `<p class="swipe-hint">👈 Arraste uma receita pro lado pra excluir</p>` : ''}
       <div id="recipe-cards">${cards || (all.length ? '<p style="text-align:center;color:var(--gray);font-size:13px">Nada encontrado.</p>' : '')}</div>
     </div>
@@ -1461,7 +1510,8 @@ function renderWeekBody(){
       <h2 class="section-title">Dias da semana <small>${planned.length}/7 planejados</small></h2>
       ${cards}
       <div class="wk-actions">
-        <button class="cta" data-act="week-to-list">🛒 Lista de compras da semana</button>
+        <button class="cta" data-act="auto-week">✨ Montar a semana com minhas receitas</button>
+        <button class="ghost-btn white-btn" data-act="week-to-list">🛒 Lista de compras da semana</button>
         <button class="ghost-btn" data-act="copy-prev-week">📋 Copiar a semana passada</button>
         <button class="ghost-btn" data-act="repeat-month">🔁 Repetir esta semana até o fim do mês</button>
       </div>
@@ -1853,6 +1903,7 @@ function matchFood(name, learned){
     score -= fw.length * 0.25;
     if(/\bcru|crua\b/.test(f.n)) score += 1.5;
     if(/sem pele/.test(f.n)) score += 0.5;
+    if(/\b(integral|light|diet|desnatad)/.test(f.n) && !words.some(w => /integral|light|diet|desnatad/.test(w))) score -= 1.5;
     if(/\b(cozid|frit|assad|grelhad|refogad|ensopad|doce|pudim|mingau|bolo|torta)/.test(f.n) && !words.some(w => /cozid|frit|assad|grelhad|refogad/.test(w))) score -= 2.5;
     score += Math.max(0, 3 - popRank(f.n) * 0.2);
     if(f.mine) score += 2;
@@ -1941,6 +1992,166 @@ async function readRecipeText(){
   state.sheet = { type: 'recreview', draft: { title: p.title, portions: numToInput(p.portions || 1), prep: p.prep }, ings, off: new Set(), text };
   renderRecipeReview();
 }
+/* ---------- receitas prontas ---------- */
+async function openReadyRecipes(){
+  state.sheet = { type: 'ready', list: null, off: new Set() };
+  openSheetHtml(`<p class="overlay-title">📚 Receitas prontas</p><p class="overlay-sub">Carregando a tabela de alimentos…</p>`);
+  try{ await ensureTaco(); }catch(e){ openSheetHtml(`<p class="overlay-title">📚 Receitas prontas</p><p class="overlay-sub">Precisa de internet na primeira vez. Tente de novo.</p><button class="ghost-btn" data-act="sheet-close">Fechar</button>`); return; }
+  if(!state.sheet || state.sheet.type !== 'ready') return;
+  const have = new Set(liveRecipes().map(r => norm(r.name)));
+  const learned = learnedFoods();
+  const list = (typeof RECEITAS_PRONTAS !== 'undefined' ? RECEITAS_PRONTAS : []).map(rp => {
+    const pr = parseRecipeText(rp.texto);
+    const ings = pr.ings.map(i => ({ ...i, food: matchFood(i.name, learned) }));
+    const kcal = ings.reduce((a, i) => a + (i.food ? ingNutri({ ...i, per100: i.food.per100 }).kcal : 0), 0) / (pr.portions || 1);
+    return { meal: rp.meal, title: pr.title, portions: pr.portions || 1, prep: pr.prep, ings, kcal, tem: have.has(norm(pr.title)) };
+  });
+  state.sheet.list = list;
+  list.forEach((r, i) => { if(r.tem) state.sheet.off.add(i); });
+  renderReadyRecipes();
+}
+const MEAL_TAG = { cafe: '☕ Café', almoco: '🍽️ Almoço/jantar', lanche: '🍎 Lanche' };
+function renderReadyRecipes(){
+  const s = state.sheet; if(!s || !s.list) return;
+  const n = s.list.filter((r, i) => !s.off.has(i) && !r.tem).length;
+  const groups = ['almoco', 'cafe', 'lanche'].map(m => {
+    const rows = s.list.map((r, i) => ({ r, i })).filter(x => x.r.meal === m);
+    return `<span class="form-label">${MEAL_TAG[m]}</span>` + rows.map(({ r, i }) => {
+      const on = !s.off.has(i) && !r.tem;
+      return `<div class="item-row" style="border-top:1px solid #F0F1F6">
+        <button class="chk ${on ? 'on' : ''}" data-act="${r.tem ? 'noop' : 'rr-toggle'}" data-idx="${i}" ${r.tem ? 'disabled' : ''}>${on ? '✓' : ''}</button>
+        <div class="item-main" data-act="${r.tem ? 'noop' : 'rr-toggle'}" data-idx="${i}"><div class="item-name">${esc(r.title)}</div>
+          <div class="item-detail">${r.tem ? 'você já tem' : `${r.ings.length} ingredientes · rende ${fmtQty(r.portions)}`}</div></div>
+        <div class="item-sub">${kcalTxt(r.kcal)}<small style="display:block;font-weight:600;color:var(--gray);font-size:11px">por porção</small></div>
+      </div>`;
+    }).join('');
+  }).join('');
+  openSheetHtml(`
+    <p class="overlay-title">📚 Receitas prontas</p>
+    <p class="overlay-sub">Receitas do dia a dia, com as calorias já calculadas. Depois você pode mudar o que quiser.</p>
+    ${groups}
+    <div class="sheet-actions">
+      <button class="cta" data-act="rr-save" ${n ? '' : 'disabled'}>Adicionar ${n} ${n === 1 ? 'receita' : 'receitas'}</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+function saveReadyRecipes(){
+  const s = state.sheet; if(!s || !s.list) return;
+  const chosen = s.list.filter((r, i) => !s.off.has(i) && !r.tem); if(!chosen.length) return;
+  chosen.forEach(rp => {
+    const ings = rp.ings.map(i => ({ id: uid('g'), foodId: i.food ? i.food.id : '', name: i.food ? i.food.name : i.name, srcName: i.name,
+      qty: i.qty, unit: i.unit, gPerUnit: i.gPerUnit, per100: i.food ? i.food.per100 : per100Of(null) }));
+    const r = { id: uid('r'), name: rp.title, portions: rp.portions, notes: rp.prep || '', meal: rp.meal, updatedAt: 0, deleted: false, ingredients: ings };
+    state.recipes.push(r); touch(r);
+  });
+  closeSheet(); render();
+  toast(`✅ ${chosen.length} ${chosen.length === 1 ? 'receita adicionada' : 'receitas adicionadas'}`, null, null, 3000);
+}
+
+/* ---------- montar a semana sozinho ---------- */
+const MEAL_SHARE = { cafe: 0.25, almoco: 0.35, lanche: 0.10, jantar: 0.30 };
+function openAutoWeek(){
+  if(!liveRecipes().length){
+    toast('Primeiro adicione algumas receitas (tem receitas prontas na aba Receitas)', null, null, 4500); return;
+  }
+  state.sheet = { type: 'autoweek', meals: new Set(['almoco', 'jantar']), onlyEmpty: true };
+  renderAutoWeek();
+}
+function recipesForMeal(meal){
+  const tag = meal === 'jantar' ? 'almoco' : meal;
+  const rs = liveRecipes().filter(r => r.ingredients.length);
+  const tagged = rs.filter(r => r.meal === tag);
+  if(tagged.length) return tagged;
+  return tag === 'almoco' ? rs.filter(r => !r.meal) : [];
+}
+function renderAutoWeek(){
+  const s = state.sheet;
+  const pf = myProfile(), e = calcTDEE(pf);
+  const counts = MEALS.map(m => ({ m, n: recipesForMeal(m.id).length }));
+  openSheetHtml(`
+    <p class="overlay-title">✨ Montar a semana</p>
+    <p class="overlay-sub">Eu distribuo as suas receitas pelos dias da semana, sem repetir a mesma no dia seguinte.${e ? ` As porções seguem a sua meta de <b>${kcalTxt(Math.max(minKcal(pf), e.tdee - (pf.deficit || 0)))}</b> por dia.` : ' Configure o perfil para eu ajustar as porções às suas calorias.'}</p>
+    <span class="form-label">Quais refeições?</span>
+    <div class="chips">${counts.map(({ m, n }) => `<button class="chip ${s.meals.has(m.id) ? 'sel' : ''} ${n ? '' : 'dis'}" data-act="${n ? 'aw-meal' : 'noop'}" data-val="${m.id}">${m.emoji} ${m.label} <small>${n} ${n === 1 ? 'receita' : 'receitas'}</small></button>`).join('')}</div>
+    <button class="chip ${s.onlyEmpty ? 'sel' : ''}" style="margin-top:14px" data-act="aw-only-empty">${s.onlyEmpty ? '✓ ' : ''}Só preencher o que está vazio</button>
+    <div class="sheet-actions">
+      <button class="cta" data-act="aw-go" ${[...s.meals].some(m => recipesForMeal(m).length) ? '' : 'disabled'}>Montar a semana</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+/* tipo de prato, para montar almoço/jantar de verdade (arroz + feijão + mistura + acompanhamento) */
+function dishRole(r){
+  const n = norm(r.name);
+  if(/^arroz\b/.test(n) && !/(carreteiro|galinhada|risoto|doce|com )/.test(n)) return 'arroz';
+  if(/^feijao\b/.test(n) && !/(tropeiro|feijoada)/.test(n)) return 'feijao';
+  if(/^(salada|pure|legumes|farofa|vinagrete|batata frita|batata cozida|mandioca cozida|couve|abobrinha refogada)/.test(n)) return 'acomp';
+  if(/(macarr|sopa|lasanha|pizza|escondidinho|caldo|risoto|galinhada|carreteiro|feijoada|yakisoba|panqueca|sanduiche|wrap)/.test(n)) return 'completo';
+  return 'principal';
+}
+const q4 = v => Math.round(v * 4) / 4;
+function runAutoWeek(){
+  const s = state.sheet;
+  const dates = weekDates(weekStartOf(state.menuDate));
+  const pf = myProfile(), e = calcTDEE(pf);
+  const target = e ? Math.max(minKcal(pf), e.tdee - (pf.deficit || 0)) : null;
+  const before = JSON.parse(JSON.stringify(state.plans));
+  const kc = r => recipeTotals(r).por.kcal || 0;
+  const entry = (r, por) => ({ id: uid('e'), type: 'recipe', refId: r.id, name: r.name, portions: Math.max(0.25, por), kcal: round2(kc(r)) });
+  let n = 0;
+  const used = {};          // id da receita → último dia usado (índice)
+  const pickFrom = (pool, di, avoid) => {
+    const ok = pool.filter(r => !(avoid || []).includes(r.id));
+    const list = (ok.length ? ok : pool).slice().sort((a, b) => ((used[a.id] ?? -9) - (used[b.id] ?? -9)) || (Math.random() - 0.5));
+    const r = list[0]; used[r.id] = di; return r;
+  };
+  let slot = 0;
+  dates.forEach((d, di0) => MEALS.forEach(m => {
+    const di = slot++;
+    if(!s.meals.has(m.id)) return;
+    const pool = recipesForMeal(m.id); if(!pool.length) return;
+    const share = target ? target * MEAL_SHARE[m.id] : null;
+    const by = role => pool.filter(r => dishRole(r) === role);
+    const mains = pool.filter(r => ['principal', 'completo'].includes(dishRole(r)));
+    {
+      const pl = ensurePlan(d), arr = pl.meals[m.id];
+      if(s.onlyEmpty && arr.length) return;
+      if(!s.onlyEmpty) arr.length = 0;
+      const lunch = m.id === 'jantar' ? (pl.meals.almoco || []).map(x => x.refId) : [];
+      const items = [];
+      if((m.id === 'almoco' || m.id === 'jantar') && mains.length){
+        const main = pickFrom(mains, di, lunch);
+        items.push([main, 1]);
+        if(dishRole(main) === 'principal'){
+          const side = by('acomp').length ? pickFrom(by('acomp'), di, lunch) : null;
+          if(side) items.push([side, 1]);
+          const bases = [by('arroz')[0], by('feijao')[0]].filter(Boolean);
+          const fixed = items.reduce((a, [r, p]) => a + kc(r) * p, 0);
+          bases.forEach(b => {
+            let por = 1;
+            if(share && kc(b) > 0) por = Math.min(2, Math.max(0.5, q4(Math.max(0, share - fixed) / bases.length / kc(b))));
+            items.push([b, por]);
+          });
+        } else if(share && kc(main) > 0){
+          items[0][1] = Math.min(2, Math.max(0.5, q4(share / kc(main))));
+        }
+      } else {
+        const r = pickFrom(pool, di, lunch);
+        let por = 1;
+        if(share && kc(r) > 0) por = Math.min(3, Math.max(0.5, Math.round(share / kc(r) * 2) / 2));
+        items.push([r, por]);
+      }
+      items.forEach(([r, por]) => arr.push(entry(r, por)));
+      touch(pl); n++;
+    }
+  }));
+  closeSheet(); render();
+  toast(n ? `✨ ${n} refeições planejadas na semana` : 'A semana já estava preenchida', n ? 'Desfazer' : null, () => {
+    const had = new Set(before.map(p => p.id));
+    const created = state.plans.filter(p => !had.has(p.id)).map(p => ({ ...p, deleted: true }));
+    state.plans = normalizePlans(before).concat(created); state.plans.forEach(p => touch(p)); render();
+  }, 6000);
+}
+
 function renderRecipeReview(){
   const s = state.sheet, d = s.draft;
   const tot = s.ings.reduce((acc, i, idx) => acc + (s.off.has(idx) || !i.food ? 0 : ingNutri({ ...i, per100: i.food.per100 }).kcal), 0);
@@ -2628,21 +2839,23 @@ function renderList(){
     </div>
     <div class="section overlap" id="stats-box"></div>
     ${l.status !== 'open' ? `<div class="section"><div class="done-banner">✅ Compra concluída <button data-act="reopen">Reabrir</button></div></div>` : ''}
-    <div class="section">
+    <div class="section quick-sec">
       <div class="card">
         <div class="quick-row">
-          <input id="quick-input" class="quick-input" placeholder="Adicionar item (ex: 2 kg frango)" autocomplete="off" autocapitalize="sentences" enterkeyhint="enter" value="${esc(state.quick)}" />
+          <input id="quick-input" class="quick-input" placeholder="Ex: arroz, feijão, 2 kg frango" autocomplete="off" autocapitalize="sentences" enterkeyhint="enter" value="${esc(state.quick)}" />
+          ${voiceSupported() ? `<button class="quick-mic keep-focus ${voice.on ? 'on' : ''}" data-act="voice" aria-label="Falar os itens">🎤</button>` : ''}
           <button class="quick-add keep-focus" data-act="quick-add" aria-label="Adicionar">+</button>
         </div>
         <div class="quick-tools">
-          <button data-act="import">📋 Lista do papel</button>
           <button data-act="photo">📷 Foto</button>
-          <button data-act="new-detailed">📝 Detalhes</button>
+          <button data-act="import">📋 Colar lista</button>
+          <button data-act="new-detailed">📝 Detalhado</button>
         </div>
+        <div id="voice-live" class="voice-live" ${voice.on ? '' : 'hidden'}>🎤 Pode falar… ex: "dois quilos de frango, arroz e leite"</div>
         <div id="sugg-box"></div>
       </div>
     </div>
-    ${l.items.length ? `<div class="section"><div class="search-box">
+    ${l.items.length > 12 || state.listSearch ? `<div class="section"><div class="search-box">
       <span>🔎</span><input id="list-search" placeholder="Procurar nesta lista (ex: queijo)" autocomplete="off" value="${esc(state.listSearch)}" />
       <button data-act="list-search-clear" class="${state.listSearch ? '' : 'hide'}" aria-label="Limpar busca">✕</button>
     </div></div>` : ''}
@@ -2659,14 +2872,14 @@ function renderStats(){
   box.innerHTML = `
     <div class="card">
       <div class="stats-grid">
-        <div><p class="stat-label">Total estimado</p><p class="stat-big">${brl(est)}</p></div>
+        <div><p class="stat-label">Total da lista</p><p class="stat-big">${brl(est)}</p></div>
         <div><p class="stat-label">No carrinho 🛒</p><p class="stat-big">${brl(cart)}</p></div>
       </div>
       <div class="progress-line"><div class="bar-track"><div class="bar-fill" style="width:${n ? b/n*100 : 0}%"></div></div><span>${b} de ${n}</span></div>
       ${meta > 0
         ? `<div class="meta-line ${over?'over':''}">🎯 Meta ${brl(meta)} · ${over ? 'passou '+brl(est-meta) : 'sobram '+brl(meta-est)}</div>`
         : `<button class="link-btn" data-act="list-settings">🎯 Definir meta de gasto</button>`}
-      ${unpriced ? `<div class="hint">💡 ${unpriced} ${unpriced>1?'itens sem preço — não entram':'item sem preço — não entra'} no total</div>` : ''}
+      ${unpriced ? `<div class="hint muted">${unpriced} ${unpriced>1?'itens sem preço':'item sem preço'} (fora do total)</div>` : ''}
       ${l.discount ? `<div class="meta-line">🎁 Desconto ${brl(l.discount)} · <b>pago ${brl(listSpent(l))}</b></div>` : ''}
       ${l.discountSpread ? `<div class="meta-line">🎁 Desconto de ${brl(l.discountSpread)} já dividido nos preços</div>` : ''}
       ${l.payments.length ? `<button class="link-btn" data-act="list-settings" style="display:block;text-decoration:none">${esc(payTags(l))} ✏️</button>` : (l.status === 'done' ? `<button class="link-btn" data-act="list-settings" style="display:block">💳 Informar como pagou</button>` : '')}
@@ -2678,17 +2891,17 @@ function renderSugg(){
   if(!box || !l) return;
   const hist = buildHistory();
   const inList = new Set(l.items.filter(i=>!i.bought).map(i => norm(i.name)));
-  const q = norm(parseQuick(state.quick).name);
+  const q = norm(parseQuick(lastPart(state.quick)).name);
   let items, title = '';
   if(q){
     items = [...hist.values()].filter(h => h.key.includes(q) && !inList.has(h.key))
       .sort((a,b) => (b.key.startsWith(q) - a.key.startsWith(q)) || b.count - a.count).slice(0, 6);
   }else{
-    items = [...hist.values()].filter(h => !inList.has(h.key)).sort((a,b) => b.count - a.count).slice(0, 10);
-    title = 'Toque pra adicionar · você costuma comprar';
+    items = [...hist.values()].filter(h => !inList.has(h.key)).sort((a,b) => b.count - a.count).slice(0, 15);
+    title = 'Você costuma comprar · toque pra pôr na lista';
   }
   if(!items.length){ box.innerHTML = ''; return; }
-  box.innerHTML = `${title ? `<p class="sugg-title">${title}</p>` : ''}<div class="chips">${items.map(h =>
+  box.innerHTML = `${title ? `<p class="sugg-title">${title}</p>` : ''}<div class="chips ${q ? '' : 'chips-scroll'}">${items.map(h =>
     `<button class="chip keep-focus" data-act="sugg" data-key="${esc(h.key)}">+ ${esc(h.name)}${h.unitPrice !== null ? ` <small>${brl(h.unitPrice)}</small>` : ''}</button>`).join('')}</div>`;
 }
 
@@ -2900,23 +3113,73 @@ function addItemToList(l, item, quiet){
   touch(l); refreshListParts();
   if(!quiet) toast(`"${item.name}" adicionado`, 'Desfazer', () => removeItem(item.id, true), 3000);
 }
+function addParts(parts){
+  const l = active(); if(!l || !parts.length) return 0;
+  if(parts.length === 1){
+    const p = parseQuick(parts[0]); if(!p.name) return 0;
+    addItemToActive(buildItemFromName(p.name, p.qty, p.unit)); return 1;
+  }
+  const before = JSON.parse(JSON.stringify(l.items)), beforeStatus = l.status;
+  let n = 0;
+  parts.forEach(t => { const p = parseQuick(t); if(p.name){ addItemToActive(buildItemFromName(p.name, p.qty, p.unit), true); n++; } });
+  hideToast();
+  if(n) toast(`${n} itens adicionados ✅`, 'Desfazer', () => { l.items = before; l.status = beforeStatus; touch(l); refreshListParts(); }, 6000);
+  return n;
+}
 function addQuick(){
   const raw = state.quick.trim(); if(!raw) return;
-  const p = parseQuick(raw); if(!p.name) return;
-  addItemToActive(buildItemFromName(p.name, p.qty, p.unit));
+  if(!addParts(splitItems(raw, false))) return;
   state.quick = '';
   const inp = document.getElementById('quick-input');
   if(inp){ inp.value = ''; inp.focus(); }
   renderSugg();
 }
+/* ---------- falar os itens (reconhecimento de voz do próprio celular, grátis) ---------- */
+const voice = { on: false, rec: null, text: '' };
+function voiceSupported(){ return !!(window.SpeechRecognition || window.webkitSpeechRecognition); }
+function setVoiceUi(){
+  const b = document.querySelector('[data-act="voice"]'); if(b) b.classList.toggle('on', voice.on);
+  const live = document.getElementById('voice-live'); if(live) live.hidden = !voice.on;
+}
+function toggleVoice(){
+  if(voice.on){ try{ voice.rec.stop(); }catch(e){} return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if(!SR) return;
+  const rec = new SR();
+  rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+  voice.rec = rec; voice.text = ''; voice.on = true; setVoiceUi();
+  if(navigator.vibrate) try{ navigator.vibrate(20); }catch(_){}
+  rec.onresult = ev => {
+    let txt = '';
+    for(let i = 0; i < ev.results.length; i++) txt += ev.results[i][0].transcript + ' ';
+    voice.text = txt.trim();
+    const live = document.getElementById('voice-live'); if(live) live.textContent = '🎤 ' + voice.text;
+  };
+  rec.onerror = ev => {
+    voice.on = false; setVoiceUi();
+    if(ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast('Libere o microfone para o app nas configurações do celular', null, null, 4500);
+    else if(ev.error === 'no-speech') toast('Não ouvi nada. Toque no 🎤 e fale de novo.', null, null, 3000);
+    else if(ev.error === 'network') toast('A voz precisa de internet', null, null, 3000);
+  };
+  rec.onend = () => {
+    voice.on = false; setVoiceUi();
+    const live = document.getElementById('voice-live'); if(live) live.textContent = '🎤 Pode falar…';
+    const t = voice.text.trim(); voice.text = '';
+    if(!t) return;
+    const n = addParts(splitItems(t, true));
+    if(n === 0) toast('Não entendi. Tente: "dois quilos de frango"', null, null, 3000);
+  };
+  try{ rec.start(); }catch(e){ voice.on = false; setVoiceUi(); }
+}
+function lastPart(t){ const i = String(t || '').search(/[,;][^,;]*$/); return i >= 0 ? t.slice(i + 1) : String(t || ''); }
 function addFromHistory(key){
   const h = buildHistory().get(key); if(!h) return;
-  const p = parseQuick(state.quick);
+  const p = parseQuick(lastPart(state.quick));
   const item = buildItemFromName(h.name, p.qty, p.unit);
   addItemToActive(item);
   if(state.quick){
-    state.quick = '';
-    const inp = document.getElementById('quick-input'); if(inp){ inp.value = ''; inp.focus(); }
+    const i = state.quick.search(/[,;][^,;]*$/);
+    state.quick = i >= 0 ? state.quick.slice(0, i + 1) + ' ' : '';
+    const inp = document.getElementById('quick-input'); if(inp){ inp.value = state.quick; inp.focus(); }
     renderSugg();
   }
 }
@@ -2969,7 +3232,7 @@ function openItemSheet(id, preset, ocr){
   const it = id ? l.items.find(i => i.id === id) : null;
   const base = it || preset || { name:'', category:'mercearia', qty:1, unit:'un', unitPrice:null, priority:'normal' };
   const d = { brand: base.brand || '', pack: base.pack || '', name: base.name || '', qty: numToInput(base.qty || 1), unit: base.unit || 'un', price: numToInput(base.unitPrice), category: base.category || 'mercearia', priority: base.priority || 'normal' };
-  state.sheet = { type:'item', id: it ? it.id : null, draft: d };
+  state.sheet = { type:'item', id: it ? it.id : null, draft: d, ean: (!it && preset && preset.ean) || null };
 
   const ocrHtml = ocr ? `
     <div class="ocr-box">
@@ -3025,6 +3288,7 @@ function saveItemSheet(){
   if(!name){ const f = document.getElementById('d-name'); if(f){ f.focus(); f.style.borderColor = '#E74C3C'; } return; }
   const qty = parseNum(d.qty), price = parseNum(d.price);
   const data = { brand: d.brand.trim(), pack: d.pack.trim(), name: cap(name), qty: qty > 0 ? round3(qty) : 1, unit: d.unit, unitPrice: price === null ? null : round2(price), category: d.category, priority: d.priority };
+  if(s.ean) eanRemember(s.ean, data);
   if(s.id){
     const it = l.items.find(i => i.id === s.id);
     if(it){ Object.assign(it, data); touch(l); refreshListParts(); }
@@ -3279,8 +3543,21 @@ function productsFromWords(words, imgW, knownBrands){
     const m = w.t.match(PRICE_WORD); if(!m) return;
     const v = parseFloat(m[1]+'.'+m[2]); if(!(v > 0 && v < 10000)) return;
     const next = good[i+1];
-    const perKg = /\/\s*(kg|l)\b/i.test(w.t) || (next && /^\/?\s*(kg|l)\b/i.test(next.t) && Math.abs(next.b.y0 - w.b.y0) < 30);
-    anchors.push({ v, perKg, b: w.b, cx: (w.b.x0+w.b.x1)/2 });
+    // "Preço por kg R$ 5,58", "R$/kg", "valor do litro": é o preço por quilo, não o preço do produto
+    const h = w.b.y1 - w.b.y0;
+    const before = good.slice(Math.max(0, i-5), i).filter(o => {
+      const oh = o.b.y1 - o.b.y0;
+      return Math.abs((o.b.y0+o.b.y1)/2 - (w.b.y0+w.b.y1)/2) < Math.min(h, oh) * 0.7 && o.b.x1 <= w.b.x0 + 5 && w.b.x0 - o.b.x1 < Math.max(h, oh) * 8;
+    }).map(o => norm(o.t)).join(' ');
+    const perKg = /\/\s*(kg|l)\b/i.test(w.t) || (next && /^\/?\s*(kg|l)\b/i.test(next.t) && Math.abs(next.b.y0 - w.b.y0) < 30)
+      || /(por|p\/|\/)\s*(kg|quilo|litro|l|100\s*g|100\s*ml)\b|unidade de medida|preco (do|por) (kg|quilo|litro)/.test(before);
+    anchors.push({ v, perKg, b: w.b, h, cx: (w.b.x0+w.b.x1)/2 });
+  });
+  // preço com letra bem menor perto de um preço grande = preço por kg/unidade (etiqueta de prateleira)
+  anchors.forEach(a => {
+    if(a.perKg) return;
+    const big = anchors.find(o => o !== a && !o.perKg && o.h > a.h * 2.2 && Math.abs(o.cx - a.cx) < (imgW || 1e9) * 0.6 && Math.abs(o.b.y0 - a.b.y0) < o.h * 4);
+    if(big) a.perKg = true;
   });
   const mains = anchors.filter(a => !a.perKg);
   if(!mains.length) return [];
@@ -3324,10 +3601,11 @@ function knownBrandsFromHistory(){ return [...new Set(liveLists().flatMap(l => l
 function openPhotoChooser(){
   state.sheet = { type:'chooser', draft:{} };
   openSheetHtml(`
-    <p class="overlay-title">📷 Foto do produto</p>
-    <p class="overlay-sub">Etiqueta da prateleira, panfleto ou print do site do mercado. Eu leio nome, marca, peso e preço — grátis, no seu celular.</p>
-    <button class="modal-btn" data-act="photo-camera"><b>📸 Tirar foto agora</b><span>Abre a câmera</span></button>
-    <button class="modal-btn" data-act="photo-gallery"><b>🖼️ Escolher da galeria</b><span>Fotos ou prints que você já tem</span></button>
+    <p class="overlay-title">📷 Adicionar por foto</p>
+    <p class="overlay-sub">Grátis, direto no seu celular.</p>
+    <button class="modal-btn" data-act="photo-barcode"><b>📦 Código de barras do produto</b><span>O jeito mais certo: acha nome, marca e peso sozinho</span></button>
+    <button class="modal-btn" data-act="photo-camera"><b>🏷️ Etiqueta da prateleira ou panfleto</b><span>Tira a foto e você marca a parte do nome e do preço</span></button>
+    <button class="modal-btn" data-act="photo-gallery"><b>🖼️ Print ou foto da galeria</b><span>Site do mercado, encarte, WhatsApp</span></button>
     <button class="ghost-btn" data-act="sheet-close">Cancelar</button>`);
 }
 function openMultiSheet(items){
@@ -3359,27 +3637,163 @@ function addMultiProducts(){
   hideToast();
   toast(`${chosen.length} ${chosen.length>1?'produtos adicionados':'produto adicionado'} ✅`, 'Desfazer', () => { l.items = before; l.status = beforeStatus; touch(l); refreshListParts(); }, 6000);
 }
+/* ---------- código de barras → nome, marca e peso (Open Food Facts, grátis) ---------- */
+const LS_EAN = 'carol_ean_v1';
+function eanCache(){ try{ return JSON.parse(localStorage.getItem(LS_EAN) || '{}') || {}; }catch(e){ return {}; } }
+function eanRemember(code, it){
+  if(!code || !it || !it.name) return;
+  const c = eanCache();
+  c[code] = { name: it.name, brand: it.brand || '', pack: it.pack || '', category: it.category || '' };
+  try{ localStorage.setItem(LS_EAN, JSON.stringify(c)); }catch(e){}
+}
+function loadZxing(){
+  return new Promise((res, rej) => {
+    if(window.ZXing) return res();
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+    s.onload = () => res(); s.onerror = () => rej(new Error('load'));
+    document.head.appendChild(s);
+  });
+}
+async function findBarcode(src, quick){
+  // 1) leitor do próprio celular (Android/Chrome)
+  if('BarcodeDetector' in window){
+    try{
+      const det = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128'] });
+      const r = await det.detect(src); if(r && r.length) return r[0].rawValue;
+    }catch(e){}
+  }
+  if(quick) return null;
+  // 2) leitor ZXing (iPhone e outros)
+  await loadZxing();
+  const Z = window.ZXing;
+  const hints = new Map();
+  hints.set(Z.DecodeHintType.TRY_HARDER, true);
+  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E, Z.BarcodeFormat.CODE_128]);
+  const big = Math.max(src.width, src.height);
+  for(const [maxSide, rot] of [[1400, 0], [900, 0], [1400, 90]]){
+    const sc = Math.min(1, maxSide / big);
+    const w = Math.round(src.width * sc), h = Math.round(src.height * sc);
+    const c = document.createElement('canvas');
+    c.width = rot ? h : w; c.height = rot ? w : h;
+    const ctx = c.getContext('2d');
+    if(rot){ ctx.translate(h, 0); ctx.rotate(Math.PI / 2); }
+    ctx.drawImage(src, 0, 0, w, h);
+    try{
+      const reader = new Z.MultiFormatReader(); reader.setHints(hints);
+      const bin = new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(c)));
+      return reader.decode(bin).getText();
+    }catch(e){}
+  }
+  return null;
+}
+function packFromQuantity(q){
+  const m = String(q || '').replace(',', '.').match(/(\d+(?:\.\d+)?)\s*(kg|g|gr|ml|l|lt|litros?)\b/i);
+  if(!m) return '';
+  const u = m[2].toLowerCase(), unit = u === 'gr' ? 'g' : /^l/.test(u) ? 'L' : u;
+  return `${m[1].replace('.', ',')} ${unit}`;
+}
+async function lookupBarcode(code){
+  const mine = eanCache()[code]; if(mine) return mine;
+  const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_pt,generic_name_pt,brands,quantity`);
+  if(!r.ok) return null;
+  const j = await r.json(); const p = j && j.status === 1 && j.product; if(!p) return null;
+  let name = String(p.product_name_pt || p.product_name || p.generic_name_pt || '').trim();
+  if(!name) return null;
+  const brand = String(p.brands || '').split(',')[0].trim();
+  const pack = packFromQuantity(p.quantity) || packFromQuantity(name);
+  if(brand) name = name.replace(new RegExp('\\b' + brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i'), ' ');
+  name = name.replace(/\b\d+(?:[.,]\d+)?\s*(kg|g|gr|ml|l|lt)\b/ig, ' ').replace(/\s+/g, ' ').replace(/^[\s\-–,]+|[\s\-–,]+$/g, '').trim();
+  return { name: cap(name.toLowerCase()), brand: brand ? brand.replace(/\b\w/g, c => c.toUpperCase()) : '', pack, category: '' };
+}
+function itemFromBarcode(code, info){
+  const h = buildHistory().get(norm(info.name));
+  return { name: h ? h.name : info.name, brand: info.brand || (h ? h.brand || '' : ''), pack: info.pack || (h ? h.pack || '' : ''),
+    qty: 1, unit: 'un', unitPrice: h ? h.unitPrice : null, category: info.category || (h ? h.category : guessCategory(info.name)),
+    priority: h ? (h.priority || 'normal') : 'normal', ean: code };
+}
+async function barcodeFromSource(src, quick){
+  const code = await findBarcode(src, quick);
+  if(!code) return false;
+  toast(`📦 Código ${code} · procurando o produto…`, null, null, 20000);
+  let info = null;
+  try{ info = await lookupBarcode(code); }catch(e){ console.warn(e); }
+  hideToast();
+  if(info){ openItemSheet(null, itemFromBarcode(code, info)); toast('✅ Achei pelo código de barras. Confira e salve.', null, null, 3000); }
+  else { openItemSheet(null, { name: '', brand: '', pack: '', qty: 1, unit: 'un', unitPrice: null, category: 'mercearia', priority: 'normal', ean: code }); toast('Produto novo: digite o nome uma vez e eu guardo para a próxima.', null, null, 4500); }
+  return true;
+}
+async function barcodePhoto(file){
+  toast('🔎 Procurando o código de barras…', null, null, 30000);
+  try{
+    const src = await loadBitmap(file);
+    if(await barcodeFromSource(src, false)) return;
+    hideToast();
+    toast('Não achei o código. Chegue mais perto, com o código reto e bem iluminado.', null, null, 4500);
+  }catch(e){ console.warn(e); hideToast(); toast('Não consegui ler agora. Precisa de internet na 1ª vez.', null, null, 4000); }
+}
+
+/* ---------- foto de etiqueta: primeiro você marca a área ---------- */
+async function photoPicked(file){
+  let src;
+  try{ src = await loadBitmap(file); }catch(e){ toast('Não consegui abrir essa foto', null, null, 3000); return; }
+  // tem código de barras na foto? (rápido, só no Android)
+  try{ if(await barcodeFromSource(src, true)) return; }catch(e){}
+  const url = URL.createObjectURL(file);
+  state.sheet = { type: 'crop', src, url, rect: null };
+  openSheetHtml(`
+    <p class="overlay-title">Marque a etiqueta</p>
+    <p class="overlay-sub">Arraste o dedo em volta do <b>nome e do preço</b>. Com só essa parte, a leitura fica bem mais certa.</p>
+    <div class="crop-box" id="crop-box"><img src="${url}" alt="" draggable="false" /><div class="crop-rect" id="crop-rect" hidden></div></div>
+    <div class="sheet-actions">
+      <button class="cta" data-act="crop-read" disabled>🔎 Ler a parte marcada</button>
+      <button class="ghost-btn" data-act="crop-all">Ler a foto inteira</button>
+      <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
+    </div>`);
+}
+function cropAndRead(all){
+  const s = state.sheet; if(!s || s.type !== 'crop') return;
+  const { src, rect, url } = s;
+  let out = src;
+  if(!all && rect && rect.w > 0.04 && rect.h > 0.03){
+    const pad = 0.02;
+    const x = Math.max(0, rect.x - pad), y = Math.max(0, rect.y - pad);
+    const w = Math.min(1 - x, rect.w + pad*2), h = Math.min(1 - y, rect.h + pad*2);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(src.width * w)); c.height = Math.max(1, Math.round(src.height * h));
+    c.getContext('2d').drawImage(src, src.width * x, src.height * y, c.width, c.height, 0, 0, c.width, c.height);
+    out = c;
+  }
+  closeSheet();
+  try{ URL.revokeObjectURL(url); }catch(e){}
+  handlePhoto(out);
+}
+
 async function handlePhoto(file){
   toast('🔎 Lendo a foto… (leva uns segundos)', null, null, 90000);
   try{
     await loadTesseract();
-    const src = await loadBitmap(file);
+    const src = (file instanceof HTMLCanvasElement || (window.ImageBitmap && file instanceof ImageBitmap)) ? file : await loadBitmap(file);
     const brands = knownBrandsFromHistory();
     let lastText = '';
-    // 1ª leitura com desfoque leve (bom para foto de tela e foto tremida); 2ª sem desfoque (print e etiqueta nítida)
-    for(const blur of [true, false]){
-      const canvas = await prepImage(src, blur);
-      const res = await Tesseract.recognize(canvas, 'por');
-      const data = (res && res.data) || {};
-      lastText = data.text || lastText;
-      const words = (data.words || []).map(w => ({ t: w.text, c: w.confidence, b: w.bbox }));
-      const items = productsFromWords(words, canvas.width, brands).map(productToItem).filter(Boolean).slice(0, 12);
-      if(items.length){
-        hideToast();
-        if(items.length === 1) openItemSheet(null, items[0]); else openMultiSheet(items);
-        return;
+    // modo "texto espalhado" (11) acha bem mais nome e preço em etiqueta e encarte; depois tenta com desfoque (foto tremida)
+    const worker = await Tesseract.createWorker('por');
+    try{
+      for(const [blur, psm] of [[false, '11'], [true, '3'], [true, '11']]){
+        await worker.setParameters({ tessedit_pageseg_mode: psm });
+        const canvas = await prepImage(src, blur);
+        const res = await worker.recognize(canvas);
+        const data = (res && res.data) || {};
+        lastText = data.text || lastText;
+        const words = (data.words || []).map(w => ({ t: w.text, c: w.confidence, b: w.bbox }));
+        const items = productsFromWords(words, canvas.width, brands).map(productToItem).filter(Boolean).slice(0, 12);
+        if(items.length){
+          hideToast();
+          if(items.length === 1) openItemSheet(null, items[0]); else openMultiSheet(items);
+          return;
+        }
       }
-    }
+    } finally { try{ await worker.terminate(); }catch(e){} }
     // não achou preço junto de nome: mostra o que conseguiu ler pra você escolher
     hideToast();
     const prices = extractPrices(lastText), names = extractNames(lastText);
@@ -3511,6 +3925,13 @@ document.addEventListener('click', e => {
     case 'clear-day': clearDay(); break;
     case 'copy-prev-week': copyPrevWeek(); break;
     case 'repeat-month': repeatWeekToMonthEnd(); break;
+    case 'ready-recipes': openReadyRecipes(); break;
+    case 'rr-toggle': { const i = Number(el.dataset.idx); const sh = state.sheet; if(sh.off.has(i)) sh.off.delete(i); else sh.off.add(i); renderReadyRecipes(); break; }
+    case 'rr-save': saveReadyRecipes(); break;
+    case 'auto-week': openAutoWeek(); break;
+    case 'aw-meal': { const sh = state.sheet; if(sh.meals.has(val)) sh.meals.delete(val); else sh.meals.add(val); renderAutoWeek(); break; }
+    case 'aw-only-empty': state.sheet.onlyEmpty = !state.sheet.onlyEmpty; renderAutoWeek(); break;
+    case 'aw-go': runAutoWeek(); break;
     case 'week-to-list': openToListSheet({ kind: 'week', start: weekStartOf(state.menuDate) }); break;
     case 'new-recipe': newRecipe(); break;
     case 'import-recipe': openRecipeImport(); break;
@@ -3635,10 +4056,14 @@ document.addEventListener('click', e => {
     case 'calc': document.getElementById('calc-overlay').classList.add('show'); break;
     case 'close-overlays': closeOverlays(); break;
     case 'quick-add': addQuick(); break;
+    case 'voice': toggleVoice(); break;
     case 'sugg': addFromHistory(el.dataset.key); break;
-    case 'photo': openPhotoChooser(); break;
+    case 'photo': if(!temPlano('completo')){ abrirPlanos('completo'); break; } openPhotoChooser(); break;
     case 'photo-camera': closeSheet(); document.getElementById('photo-input').click(); break;
     case 'photo-gallery': closeSheet(); document.getElementById('gallery-input').click(); break;
+    case 'photo-barcode': closeSheet(); document.getElementById('barcode-input').click(); break;
+    case 'crop-read': cropAndRead(false); break;
+    case 'crop-all': cropAndRead(true); break;
     case 'multi-toggle': {
       const i = Number(el.dataset.idx), off = state.sheet.off;
       off.has(i) ? off.delete(i) : off.add(i);
@@ -3787,8 +4212,33 @@ document.getElementById('recipe-photo-input').addEventListener('change', e => {
 ['photo-input','gallery-input'].forEach(id => document.getElementById(id).addEventListener('change', e => {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
-  if(file) handlePhoto(file);
+  if(file) photoPicked(file);
 }));
+document.getElementById('barcode-input').addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if(file) barcodePhoto(file);
+});
+/* arrastar o dedo para marcar a área da etiqueta */
+let cropDrag = null;
+document.addEventListener('pointerdown', e => {
+  const box = e.target.closest('#crop-box'); if(!box || !state.sheet || state.sheet.type !== 'crop') return;
+  e.preventDefault();
+  const r = box.getBoundingClientRect();
+  cropDrag = { r, x0: (e.clientX - r.left) / r.width, y0: (e.clientY - r.top) / r.height, id: e.pointerId };
+  try{ box.setPointerCapture(e.pointerId); }catch(_){}
+});
+document.addEventListener('pointermove', e => {
+  if(!cropDrag || e.pointerId !== cropDrag.id) return;
+  const { r } = cropDrag, cl = v => Math.max(0, Math.min(1, v));
+  const x1 = cl((e.clientX - r.left) / r.width), y1 = cl((e.clientY - r.top) / r.height);
+  const rect = { x: Math.min(cropDrag.x0, x1), y: Math.min(cropDrag.y0, y1), w: Math.abs(x1 - cropDrag.x0), h: Math.abs(y1 - cropDrag.y0) };
+  state.sheet.rect = rect;
+  const el = document.getElementById('crop-rect');
+  if(el){ el.hidden = false; Object.assign(el.style, { left: rect.x*100+'%', top: rect.y*100+'%', width: rect.w*100+'%', height: rect.h*100+'%' }); }
+  const b = document.querySelector('[data-act="crop-read"]'); if(b) b.disabled = !(rect.w > 0.04 && rect.h > 0.03);
+});
+document.addEventListener('pointerup', e => { if(cropDrag && e.pointerId === cropDrag.id) cropDrag = null; });
 
 /* =========================================================
    CALCULADORA (não mexe na lista)
