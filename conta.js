@@ -24,15 +24,18 @@ const PLANOS = [
   { id: 'cardapio', nome: 'Cardápio', emoji: '🍲', cor: '#C2410C',
     itens: ['📅 Cardápio da semana e do mês', '🔥 Calorias e meta do dia', '🛒 Gera a lista de compras pelo cardápio'],
     mensal: { sku: 'cardapio_mensal', preco: 'R$ 4,99' }, vitalicio: { sku: 'cardapio_vitalicio', preco: 'R$ 12,90' } },
+  { id: 'dieta', nome: 'Dieta', emoji: '🥗', cor: '#0F8A5F',
+    itens: ['🥗 50 receitas leves já com calorias', '📅 Cardápio da semana e do mês', '✨ Monta a semana sozinho na sua meta', '🔥 Calorias e meta do dia'],
+    mensal: { sku: 'dieta_mensal', preco: 'R$ 5,99' }, vitalicio: { sku: 'dieta_vitalicio', preco: 'R$ 14,90' } },
   { id: 'completo', nome: 'Completo', emoji: '⭐', cor: '#383772', destaque: true,
-    itens: ['✅ Tudo do Economia + Cardápio', '📦 Adicionar pelo código de barras', '📷 Leitura de etiqueta e encarte por foto', '👨‍👩‍👦 Lista compartilhada com a família (em breve)'],
+    itens: ['✅ Tudo do Economia + Cardápio + Dieta', '📦 Adicionar pelo código de barras', '📷 Leitura de etiqueta e encarte por foto', '👨‍👩‍👦 Lista compartilhada com a família (em breve)'],
     mensal: { sku: 'completo_mensal', preco: 'R$ 7,99' }, vitalicio: { sku: 'completo_vitalicio', preco: 'R$ 19,90' } },
 ];
 const PLANO_BY = Object.fromEntries(PLANOS.map(p => [p.id, p]));
 const SKU_PLANO = {};
 PLANOS.forEach(p => { SKU_PLANO[p.mensal.sku] = p.id; SKU_PLANO[p.vitalicio.sku] = p.id; });
 /* qual plano libera cada função */
-const FUNCAO_PLANOS = { economia: ['economia', 'completo'], cardapio: ['cardapio', 'completo'], completo: ['completo'] };
+const FUNCAO_PLANOS = { economia: ['economia', 'completo'], cardapio: ['cardapio', 'dieta', 'completo'], dieta: ['dieta', 'completo'], completo: ['completo'] };
 
 const LS_ENT = 'lc_acesso_v1';         // planos liberados (cópia para usar sem internet)
 const LS_TWA = 'lc_app_loja_v1';       // aberto pelo app da Google Play
@@ -168,10 +171,10 @@ function abrirPlanos(foco, tipo){
 }
 function htmlPlanos(){
   const s = state.sheet, tipo = s.tipo;
-  const motivo = s.foco && PLANO_BY[s.foco] ? `<p class="overlay-sub">🔒 Essa função faz parte do plano <b>${PLANO_BY[s.foco].emoji} ${PLANO_BY[s.foco].nome}</b> (ou do Completo).</p>` : `<p class="overlay-sub">Listas e Receitas já são seus. Libere o resto quando quiser.</p>`;
+  const motivo = s.foco && PLANO_BY[s.foco] ? `<p class="overlay-sub">🔒 Essa função faz parte do plano <b>${PLANO_BY[s.foco].emoji} ${PLANO_BY[s.foco].nome}</b>${s.foco === 'cardapio' ? ' (ou do Dieta, ou do Completo)' : ' (ou do Completo)'}.</p>` : `<p class="overlay-sub">Listas e Receitas já são seus. Libere o resto quando quiser.</p>`;
   const cards = PLANOS.map(p => {
     const opc = p[tipo], preco = conta.precos[opc.sku] || opc.preco;
-    const meu = conta.planos.has(p.id) || (p.id !== 'completo' && conta.planos.has('completo'));
+    const meu = conta.planos.has(p.id) || (p.id !== 'completo' && conta.planos.has('completo')) || (p.id === 'cardapio' && conta.planos.has('dieta'));
     const focado = s.foco === p.id || (!s.foco && p.destaque);
     return `
       <div class="plano-card ${focado ? 'foco' : ''}" style="--pc:${p.cor}">

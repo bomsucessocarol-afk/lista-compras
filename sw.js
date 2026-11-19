@@ -3,7 +3,8 @@
    - Ícones e bibliotecas: usa a cópia guardada e atualiza em segundo plano.
    - Dados (Supabase): nunca passam pelo cache. */
 const CACHE = 'lista-compras-v15';
-const SHELL = ['./', './index.html', './conta.js', './receitas-prontas.js', './privacidade.html', './manifest.json', './taco.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
+const CACHE = 'lista-compras-v16';
+const SHELL = ['./', './index.html', './conta.js', './receitas-prontas.js', './receitas-dieta.js', './privacidade.html', './manifest.json', './taco.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

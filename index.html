@@ -35,6 +35,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="conta.js"></script>
 <script src="receitas-prontas.js"></script>
+<script src="receitas-dieta.js"></script>
 <style>
   :root{
     --navy:#383772;
@@ -670,6 +671,7 @@ function normalizeRecipes(raw){
     id: String(r.id), name: String(r.name || 'Receita').trim(), portions: Number(r.portions) > 0 ? Number(r.portions) : 1,
     notes: String(r.notes || ''), updatedAt: Number(r.updatedAt) || 0, deleted: !!r.deleted,
     meal: ['cafe','almoco','lanche'].includes(r.meal) ? r.meal : '',
+    pack: r.pack === 'dieta' ? 'dieta' : '',
     ingredients: (Array.isArray(r.ingredients) ? r.ingredients : []).filter(Boolean).map(i => ({
       id: String(i.id || uid('g')), foodId: String(i.foodId || ''), name: String(i.name || 'Ingrediente'), srcName: String(i.srcName || ''),
       qty: Number(i.qty) > 0 ? Number(i.qty) : 0, unit: ING_UNITS[i.unit] ? i.unit : 'g',
@@ -1889,20 +1891,22 @@ function matchFood(name, learned){
   const mineExact = liveFoods().find(f => norm(f.name) === key); if(mineExact) return mineExact;
   const keyCore = key.split(/\s+/).filter(w => !ING_STOP.has(w)).join(' ');
   const aliasKey = Object.keys(ING_ALIAS).find(a => key === a || keyCore === a);
-  let words = (aliasKey ? ING_ALIAS[aliasKey] : key).replace(/[,()/]/g, ' ').split(/\s+/).filter(w => w && !ING_STOP.has(w) && !/^\d/.test(w));
+  let words = (aliasKey ? ING_ALIAS[aliasKey] : key).replace(/[,()/-]/g, ' ').split(/\s+/).filter(w => w && !ING_STOP.has(w) && !/^\d/.test(w));
   if(!words.length || !TACO) return null;
   const sing = w => w.length > 4 && w.endsWith('s') ? w.slice(0, -1) : w;
   const pool = [...liveFoods().map(f => ({ ...f, n: norm(f.name), mine: true })), ...TACO];
   let best = null, bestScore = 0;
   for(const f of pool){
-    const fw = f.n.replace(/[,()/]/g, ' ').split(/\s+/).filter(Boolean);
+    const fw = f.n.replace(/[,()/-]/g, ' ').split(/\s+/).filter(Boolean);
     const has = w => fw.some(x => sing(x) === sing(w) || (sing(w).length >= 4 && x.startsWith(sing(w))));
     if(!has(words[0])) continue;
     let score = 10;
-    words.slice(1).forEach(w => { if(has(w)) score += 3; });
+    words.slice(1).forEach(w => { if(has(w)) score += 3; else if(w.length >= 4) score -= 1.5; });
+    if(sing(fw[0]) === sing(words[0])) score += 2;
     score -= fw.length * 0.25;
     if(/\bcru|crua\b/.test(f.n)) score += 1.5;
     if(/sem pele/.test(f.n)) score += 0.5;
+    if(/\b(po|desidratad\w*|congelad\w*|enlatad\w*|em calda)\b/.test(f.n) && !words.some(w => /^(po|desidratad|congelad|enlatad|calda)/.test(w))) score -= 2.5;
     if(/\b(integral|light|diet|desnatad)/.test(f.n) && !words.some(w => /integral|light|diet|desnatad/.test(w))) score -= 1.5;
     if(/\b(cozid|frit|assad|grelhad|refogad|ensopad|doce|pudim|mingau|bolo|torta)/.test(f.n) && !words.some(w => /cozid|frit|assad|grelhad|refogad/.test(w))) score -= 2.5;
     score += Math.max(0, 3 - popRank(f.n) * 0.2);
@@ -1993,34 +1997,41 @@ async function readRecipeText(){
   renderRecipeReview();
 }
 /* ---------- receitas prontas ---------- */
-async function openReadyRecipes(){
-  state.sheet = { type: 'ready', list: null, off: new Set() };
+function dietaLiberada(){ return typeof temPlano !== 'function' || temPlano('dieta'); }
+async function openReadyRecipes(pack){
+  pack = pack || 'dia';
+  state.sheet = { type: 'ready', pack, list: null, off: new Set() };
   openSheetHtml(`<p class="overlay-title">📚 Receitas prontas</p><p class="overlay-sub">Carregando a tabela de alimentos…</p>`);
   try{ await ensureTaco(); }catch(e){ openSheetHtml(`<p class="overlay-title">📚 Receitas prontas</p><p class="overlay-sub">Precisa de internet na primeira vez. Tente de novo.</p><button class="ghost-btn" data-act="sheet-close">Fechar</button>`); return; }
   if(!state.sheet || state.sheet.type !== 'ready') return;
   const have = new Set(liveRecipes().map(r => norm(r.name)));
   const learned = learnedFoods();
-  const list = (typeof RECEITAS_PRONTAS !== 'undefined' ? RECEITAS_PRONTAS : []).map(rp => {
+  const fonte = pack === 'dieta' ? (typeof RECEITAS_DIETA !== 'undefined' ? RECEITAS_DIETA : []) : (typeof RECEITAS_PRONTAS !== 'undefined' ? RECEITAS_PRONTAS : []);
+  const list = fonte.map(rp => {
     const pr = parseRecipeText(rp.texto);
     const ings = pr.ings.map(i => ({ ...i, food: matchFood(i.name, learned) }));
     const kcal = ings.reduce((a, i) => a + (i.food ? ingNutri({ ...i, per100: i.food.per100 }).kcal : 0), 0) / (pr.portions || 1);
-    return { meal: rp.meal, title: pr.title, portions: pr.portions || 1, prep: pr.prep, ings, kcal, tem: have.has(norm(pr.title)) };
+    return { meal: rp.meal, pack, title: pr.title, portions: pr.portions || 1, prep: pr.prep, ings, kcal, tem: have.has(norm(pr.title)) };
   });
   state.sheet.list = list;
   list.forEach((r, i) => { if(r.tem) state.sheet.off.add(i); });
+  if(pack === 'dieta' && !dietaLiberada()) list.forEach((r, i) => state.sheet.off.add(i));
   renderReadyRecipes();
 }
 const MEAL_TAG = { cafe: '☕ Café', almoco: '🍽️ Almoço/jantar', lanche: '🍎 Lanche' };
 function renderReadyRecipes(){
   const s = state.sheet; if(!s || !s.list) return;
-  const n = s.list.filter((r, i) => !s.off.has(i) && !r.tem).length;
+  const bloq = s.pack === 'dieta' && !dietaLiberada();
+  const n = bloq ? 0 : s.list.filter((r, i) => !s.off.has(i) && !r.tem).length;
+  const nDieta = typeof RECEITAS_DIETA !== 'undefined' ? RECEITAS_DIETA.length : 0;
   const groups = ['almoco', 'cafe', 'lanche'].map(m => {
     const rows = s.list.map((r, i) => ({ r, i })).filter(x => x.r.meal === m);
     return `<span class="form-label">${MEAL_TAG[m]}</span>` + rows.map(({ r, i }) => {
       const on = !s.off.has(i) && !r.tem;
+      const act = bloq ? 'pw-plano" data-val="dieta' : r.tem ? 'noop' : 'rr-toggle';
       return `<div class="item-row" style="border-top:1px solid #F0F1F6">
-        <button class="chk ${on ? 'on' : ''}" data-act="${r.tem ? 'noop' : 'rr-toggle'}" data-idx="${i}" ${r.tem ? 'disabled' : ''}>${on ? '✓' : ''}</button>
-        <div class="item-main" data-act="${r.tem ? 'noop' : 'rr-toggle'}" data-idx="${i}"><div class="item-name">${esc(r.title)}</div>
+        <button class="chk ${on ? 'on' : ''}" data-act="${act}" data-idx="${i}" ${r.tem ? 'disabled' : ''}>${bloq ? '🔒' : on ? '✓' : ''}</button>
+        <div class="item-main" data-act="${act}" data-idx="${i}"><div class="item-name">${esc(r.title)}</div>
           <div class="item-detail">${r.tem ? 'você já tem' : `${r.ings.length} ingredientes · rende ${fmtQty(r.portions)}`}</div></div>
         <div class="item-sub">${kcalTxt(r.kcal)}<small style="display:block;font-weight:600;color:var(--gray);font-size:11px">por porção</small></div>
       </div>`;
@@ -2028,10 +2039,18 @@ function renderReadyRecipes(){
   }).join('');
   openSheetHtml(`
     <p class="overlay-title">📚 Receitas prontas</p>
-    <p class="overlay-sub">Receitas do dia a dia, com as calorias já calculadas. Depois você pode mudar o que quiser.</p>
+    ${nDieta ? `<div class="prio-row" style="margin:4px 0 6px">
+      <button class="chip ${s.pack === 'dia' ? 'sel' : ''}" data-act="rr-pack" data-val="dia">🍲 Dia a dia</button>
+      <button class="chip ${s.pack === 'dieta' ? 'sel' : ''}" data-act="rr-pack" data-val="dieta">🥗 Dieta (${nDieta})${dietaLiberada() ? '' : ' 🔒'}</button>
+    </div>` : ''}
+    <p class="overlay-sub">${s.pack === 'dieta'
+      ? `${nDieta} receitas leves para café, almoço, jantar e lanche, com as calorias já calculadas.${bloq ? ' <b>Faz parte do plano 🥗 Dieta.</b>' : ''}<br/><small>As calorias são aproximadas (tabela TACO). Para uma dieta sob medida, procure um nutricionista.</small>`
+      : 'Receitas do dia a dia, com as calorias já calculadas. Depois você pode mudar o que quiser.'}</p>
     ${groups}
     <div class="sheet-actions">
-      <button class="cta" data-act="rr-save" ${n ? '' : 'disabled'}>Adicionar ${n} ${n === 1 ? 'receita' : 'receitas'}</button>
+      ${bloq ? `<button class="cta" data-act="pw-plano" data-val="dieta">🔓 Liberar as ${nDieta} receitas de dieta</button>`
+        : `<button class="cta" data-act="rr-save" ${n ? '' : 'disabled'}>Adicionar ${n} ${n === 1 ? 'receita' : 'receitas'}</button>
+      `}
       <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
     </div>`);
 }
@@ -2041,7 +2060,7 @@ function saveReadyRecipes(){
   chosen.forEach(rp => {
     const ings = rp.ings.map(i => ({ id: uid('g'), foodId: i.food ? i.food.id : '', name: i.food ? i.food.name : i.name, srcName: i.name,
       qty: i.qty, unit: i.unit, gPerUnit: i.gPerUnit, per100: i.food ? i.food.per100 : per100Of(null) }));
-    const r = { id: uid('r'), name: rp.title, portions: rp.portions, notes: rp.prep || '', meal: rp.meal, updatedAt: 0, deleted: false, ingredients: ings };
+    const r = { id: uid('r'), name: rp.title, portions: rp.portions, notes: rp.prep || '', meal: rp.meal, pack: rp.pack === 'dieta' ? 'dieta' : '', updatedAt: 0, deleted: false, ingredients: ings };
     state.recipes.push(r); touch(r);
   });
   closeSheet(); render();
@@ -2054,12 +2073,13 @@ function openAutoWeek(){
   if(!liveRecipes().length){
     toast('Primeiro adicione algumas receitas (tem receitas prontas na aba Receitas)', null, null, 4500); return;
   }
-  state.sheet = { type: 'autoweek', meals: new Set(['almoco', 'jantar']), onlyEmpty: true };
+  state.sheet = { type: 'autoweek', meals: new Set(['almoco', 'jantar']), onlyEmpty: true, soDieta: liveRecipes().some(r => r.pack === 'dieta') };
   renderAutoWeek();
 }
 function recipesForMeal(meal){
   const tag = meal === 'jantar' ? 'almoco' : meal;
-  const rs = liveRecipes().filter(r => r.ingredients.length);
+  const soDieta = state.sheet && state.sheet.type === 'autoweek' && state.sheet.soDieta;
+  const rs = liveRecipes().filter(r => r.ingredients.length && (!soDieta || r.pack === 'dieta'));
   const tagged = rs.filter(r => r.meal === tag);
   if(tagged.length) return tagged;
   return tag === 'almoco' ? rs.filter(r => !r.meal) : [];
@@ -2073,7 +2093,10 @@ function renderAutoWeek(){
     <p class="overlay-sub">Eu distribuo as suas receitas pelos dias da semana, sem repetir a mesma no dia seguinte.${e ? ` As porções seguem a sua meta de <b>${kcalTxt(Math.max(minKcal(pf), e.tdee - (pf.deficit || 0)))}</b> por dia.` : ' Configure o perfil para eu ajustar as porções às suas calorias.'}</p>
     <span class="form-label">Quais refeições?</span>
     <div class="chips">${counts.map(({ m, n }) => `<button class="chip ${s.meals.has(m.id) ? 'sel' : ''} ${n ? '' : 'dis'}" data-act="${n ? 'aw-meal' : 'noop'}" data-val="${m.id}">${m.emoji} ${m.label} <small>${n} ${n === 1 ? 'receita' : 'receitas'}</small></button>`).join('')}</div>
-    <button class="chip ${s.onlyEmpty ? 'sel' : ''}" style="margin-top:14px" data-act="aw-only-empty">${s.onlyEmpty ? '✓ ' : ''}Só preencher o que está vazio</button>
+    <div class="chips" style="margin-top:14px">
+      <button class="chip ${s.onlyEmpty ? 'sel' : ''}" data-act="aw-only-empty">${s.onlyEmpty ? '✓ ' : ''}Só preencher o que está vazio</button>
+      ${liveRecipes().some(r => r.pack === 'dieta') ? `<button class="chip ${s.soDieta ? 'sel' : ''}" data-act="aw-dieta">${s.soDieta ? '✓ ' : ''}🥗 Só receitas de dieta</button>` : ''}
+    </div>
     <div class="sheet-actions">
       <button class="cta" data-act="aw-go" ${[...s.meals].some(m => recipesForMeal(m).length) ? '' : 'disabled'}>Montar a semana</button>
       <button class="ghost-btn" data-act="sheet-close">Cancelar</button>
@@ -2084,7 +2107,8 @@ function dishRole(r){
   const n = norm(r.name);
   if(/^arroz\b/.test(n) && !/(carreteiro|galinhada|risoto|doce|com )/.test(n)) return 'arroz';
   if(/^feijao\b/.test(n) && !/(tropeiro|feijoada)/.test(n)) return 'feijao';
-  if(/^(salada|pure|legumes|farofa|vinagrete|batata frita|batata cozida|mandioca cozida|couve|abobrinha refogada)/.test(n)) return 'acomp';
+  if(/^salada de (atum|frango|grao|ovo|carne)/.test(n)) return 'completo';
+  if(/^(salada|pure|legumes|farofa|vinagrete|batata|brocolis|couve|chuchu|abobrinha refogada|mandioca cozida)/.test(n)) return 'acomp';
   if(/(macarr|sopa|lasanha|pizza|escondidinho|caldo|risoto|galinhada|carreteiro|feijoada|yakisoba|panqueca|sanduiche|wrap)/.test(n)) return 'completo';
   return 'principal';
 }
@@ -2137,7 +2161,7 @@ function runAutoWeek(){
       } else {
         const r = pickFrom(pool, di, lunch);
         let por = 1;
-        if(share && kc(r) > 0) por = Math.min(3, Math.max(0.5, Math.round(share / kc(r) * 2) / 2));
+        if(share && kc(r) > 0) por = Math.min(2, Math.max(0.5, Math.round(share / kc(r) * 2) / 2));
         items.push([r, por]);
       }
       items.forEach(([r, por]) => arr.push(entry(r, por)));
@@ -3928,10 +3952,12 @@ document.addEventListener('click', e => {
     case 'ready-recipes': openReadyRecipes(); break;
     case 'rr-toggle': { const i = Number(el.dataset.idx); const sh = state.sheet; if(sh.off.has(i)) sh.off.delete(i); else sh.off.add(i); renderReadyRecipes(); break; }
     case 'rr-save': saveReadyRecipes(); break;
+    case 'rr-pack': openReadyRecipes(val); break;
     case 'auto-week': openAutoWeek(); break;
     case 'aw-meal': { const sh = state.sheet; if(sh.meals.has(val)) sh.meals.delete(val); else sh.meals.add(val); renderAutoWeek(); break; }
     case 'aw-only-empty': state.sheet.onlyEmpty = !state.sheet.onlyEmpty; renderAutoWeek(); break;
     case 'aw-go': runAutoWeek(); break;
+    case 'aw-dieta': state.sheet.soDieta = !state.sheet.soDieta; renderAutoWeek(); break;
     case 'week-to-list': openToListSheet({ kind: 'week', start: weekStartOf(state.menuDate) }); break;
     case 'new-recipe': newRecipe(); break;
     case 'import-recipe': openRecipeImport(); break;
